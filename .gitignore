@@ -1,0 +1,16 @@
+## ignore all files
+*
+## ignore all folders
+!/**/
+## include all *.c files in root and subfolders
+!*.py
+!*.csv
+#!*.txt
+!*.bat
+!.gitignore
+#exclude folders
+!
+/vs2017/
+## include *.py in all folders(subfolders)
+#!*.py
+#!/sw/*.c
