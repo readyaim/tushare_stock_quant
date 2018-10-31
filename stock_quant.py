@@ -552,20 +552,20 @@ class LeftPanel(wx.Panel):
         for label, value, eHandler in [chooseCondDateItem]:
             text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
             sizer.Add(text, 0, wx.ALL, 2)
-            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN
-                                      | wx.adv.DP_SHOWCENTURY)
-            #self.Bind()
+            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN | wx.adv.DP_SHOWCENTURY)
+#            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DEFAULT)
+            self.Bind(wx.adv.EVT_DATE_CHANGED, self.EvtStartDate, datepicker)
             sizer.Add(datepicker, 0, wx.ALL, 2)
     def buildChooseCondPriceData(self):
-        return ((u'收盘价', 2, self.EvtCombo1Box, 5, self.EvtCombo1Box),
-                    (u'日均价', 1, self.EvtCombo1Box, '0', self.EvtCondText),
+        return ((u'收盘价', 2, self.choiceList, self.EvtCombo1Box, 5, self.EvtCombo1Box),
+                    (u'日均价', 1, self.pickList, self.EvtCombo1Box, '0', self.EvtCondText),
                     )
     def buildOneChooseCondPrice(self, sizer, chooseCondPriceItem):
-        for label, cmbxIdx1, eHandler1,cmbxIdx2,eHandler2 in [chooseCondPriceItem]:
+        for label, cmbxIdx1, choices, eHandler1,cmbxIdx2,eHandler2 in [chooseCondPriceItem]:
             text = wx.StaticText(self, label=label)
             sizer.Add(text, 0, wx.ALL, 2)
-            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.choiceList, value=self.choiceList[cmbxIdx1],style=wx.CB_DROPDOWN)
-            self.Bind(wx.EVT_TEXT, eHandler1, cmbx)
+            cmbx = wx.ComboBox(self, size=(50, -1), choices=choices, value=choices[cmbxIdx1],style=wx.CB_DROPDOWN|wx.CB_READONLY)
+            self.Bind(wx.EVT_COMBOBOX, eHandler1, cmbx)
             sizer.Add(cmbx, 0, wx.ALL, 2)
             if isinstance(cmbxIdx2,str):
                 #textctrl
@@ -724,11 +724,24 @@ class LeftPanel(wx.Panel):
             text = wx.StaticText(self, label='%')
             sizer.Add(text, 0, wx.ALL, 2)
         return sizer    
-    def EvtCheckBox(self, event):
-        pass
+    def EvtCheckBox(self, e):
+        print(e)
+        a = e.GetEventObject()
+        print(a)
+        print(a.GetValue())
+    def EvtStartDate(self, e):
+        print(e)
+        print(e.GetDate())
+        a = e.GetDate()
+        b=a.FormatISODate()
+        print(type(a))
+        print(b)
     def EvtCond1(self, event):
         pass
-    def EvtCombo1Box(self, event):
+    def EvtCombo1Box(self, e):
+        print(e)
+        print(e.GetSelection())
+        print(e.GetString())
         pass
     def EvtCombo2Box(self, event):
         pass
