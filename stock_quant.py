@@ -1,6 +1,8 @@
-﻿# /usr/bin/env python
+﻿# !/usr/bin/env python
 '''This is the wxPython for stock quant
 stock_quant.py
+add model to 'updateData'
+add threading.event to 'stop' button
 '''
 
 
@@ -51,6 +53,7 @@ from sqlalchemy.orm import sessionmaker, relationship
 
 
 
+
 # creat log in trace.log
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -74,7 +77,7 @@ if logger.hasHandlers() is False:
 
 # Global variable definition here
 
-G_NUM_OF_CODES = 3625
+G_NUM_OF_CODES = 3      #3625
 
 #sql_get_codes = "SELECT code FROM '%s'"
 
@@ -102,6 +105,35 @@ class TestThread(threading.Thread):
 
 
 # Class definition here
+class AbstractModel(object):
+    def __init__(self):
+        self.listeners = []
+    def addListener(self, listenerFunc):
+        self.listeners.append(listenerFunc)
+    def removeListener(self, listenerFunc):
+        self.listeners.remove(listenerFunc)
+    def update(self):   #定义，子类找到父类方法，但self指向的是子类的实例，不是父类实例，也不是子类。
+        for eachFunc in self.listeners:
+            print(self)
+            #在继承时，传入的是哪个实例，就是那个传入的实例，而不是指定义了self的类的实例
+            eachFunc(self)  #这是调用，不是定义，self指向子类实例(frame.model)
+class SimpleName(AbstractModel):
+    def __init__(self, first="", last=""):
+        AbstractModel.__init__(self)
+        self.set(first, last)
+    def set(self, first, last):
+        self.first = first
+        self.last = last
+        self.update() #1 更新, 这是方法调用，不需要self作为参数，子类中没有update方法，向父类寻找
+
+#class SimpleDBName(AbstractModel):
+#    def __init__(self, dbName=""):
+#        AbstractModel.__init__(self)
+#        self.set(dbName)
+#    def set(self, dbName):
+#        self.dbName = dbName
+#        self.update() #1 更新, 这是方法调用，不需要self作为参数，子类中没有update方法，向父类寻找
+
 class HqDataHandler():
     def __init__(self,menu):
 #        threading.Thread.__init__(self)
@@ -194,10 +226,10 @@ class HqDataHandler():
                             df = ts.get_h_data(code, start=span[0], end=span[1], retry_count=3, pause=5)
                         else:
                             df = ts.get_h_data(code, start=span[0], end=span[1], autype=self.autype, retry_count=3, pause=5)
-                        #time.sleep(2)
+#                        time.sleep(2)
                         #add a columen code
                         df['code']=code
-                        #print(df)
+                        print(df)
                         #df.to_sql("_%s"%code,self.engine, if_exists='append',index=True)
                         df.to_sql("%s"%self.tablenm_hqall,self.engine, if_exists='append',index=True)
                         logger.debug("write %s to DB",code)
@@ -217,7 +249,8 @@ class HqDataHandler():
             except Exception as e:
                 logger.info(e)
             
-            if (i>=G_NUM_OF_CODES+100):
+            if (i>=G_NUM_OF_CODES):
+#            if (i>=3):
                 pub.sendMessage("update", msg="endHQupdate")
                 break
         pub.sendMessage("update", msg="endHQupdate")            
@@ -465,135 +498,425 @@ import os
 from datetime import datetime,timedelta
 import threading
 from wx.lib.pubsub import pub
+import wx.adv
+from wx.lib.splitter import MultiSplitterWindow
 
+class PageOne(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        t = wx.StaticText(self, -1, "This is a PageOne object", (20,20), style=wx.ST_NO_AUTORESIZE)
+class LeftPanel(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        self.choiceList = [u'偏离', u'低于', u'高于']
+        self.pickList = [u'至多',u'至少']
+        self.daysAveList = ['5', '20','30','60','120','240']
+        mainsizer = wx.BoxSizer(wx.VERTICAL)
+        #筛选条件
+        sizer = self.buildChooseCondBar()
+        mainsizer.Add(sizer,0, wx.EXPAND)
+        mainsizer.AddSpacer(10)
+        #均价关系
+        sizer = self.buildAveRelationBars()
+        mainsizer.Add(sizer,0, wx.EXPAND)
+        mainsizer.AddSpacer(10)
+        #量能标准
+        sizer = self.createAmtErgBars()
+        mainsizer.Add(sizer,0, wx.EXPAND)
+        mainsizer.AddSpacer(10)
+        #终止条件
+        staticsizer = self.buildEndCondBar()
+        mainsizer.Add(staticsizer,0, wx.EXPAND)
+        mainsizer.AddSpacer(10)
+        #启动按钮
+        button = wx.Button(self, -1, label=u"开始量能筛选")
+        self.Bind(wx.EVT_BUTTON, self.Evt_Startup, button)
+        mainsizer.Add(button)
+        
+        self.SetBackgroundColour("white")
+        self.SetSizerAndFit(mainsizer)
+        self.SetSizer(mainsizer)
+#        mainsizer.Fit(self)
+        self.Fit()
+        self.Show()
+    
+    def buildChooseCondData(self):
+        return ((u"开始日期", "2018-10-25",self.EvtDatePick),
+                    (u"截止日期", "2018-10-31",self.EvtDatePick))
+    def buildChooseCondDate(self):
+        hSizer = wx.BoxSizer(wx.HORIZONTAL)
+        for chooseCondDateItem in self.buildChooseCondData():
+            self.buildOneChooseCondDate(hSizer, chooseCondDateItem)
+        return hSizer
+    def buildOneChooseCondDate(self, sizer, chooseCondDateItem):
+        for label, value, eHandler in [chooseCondDateItem]:
+            text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
+            sizer.Add(text, 0, wx.ALL, 2)
+            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN
+                                      | wx.adv.DP_SHOWCENTURY)
+            #self.Bind()
+            sizer.Add(datepicker, 0, wx.ALL, 2)
+    def buildChooseCondPriceData(self):
+        return ((u'收盘价', 2, self.EvtCombo1Box, 5, self.EvtCombo1Box),
+                    (u'日均价', 1, self.EvtCombo1Box, '0', self.EvtCondText),
+                    )
+    def buildOneChooseCondPrice(self, sizer, chooseCondPriceItem):
+        for label, cmbxIdx1, eHandler1,cmbxIdx2,eHandler2 in [chooseCondPriceItem]:
+            text = wx.StaticText(self, label=label)
+            sizer.Add(text, 0, wx.ALL, 2)
+            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.choiceList, value=self.choiceList[cmbxIdx1],style=wx.CB_DROPDOWN)
+            self.Bind(wx.EVT_TEXT, eHandler1, cmbx)
+            sizer.Add(cmbx, 0, wx.ALL, 2)
+            if isinstance(cmbxIdx2,str):
+                #textctrl
+                obj = wx.SpinCtrl(self, size=(50,-1))
+                obj.SetRange(1,100)
+                obj.SetValue(int(cmbxIdx2))
+                self.Bind(wx.EVT_TEXT, eHandler2, obj)
+            else:
+                #combox
+                obj = wx.ComboBox(self, size=(50, -1), choices=self.daysAveList, value=self.daysAveList[cmbxIdx2],style=wx.CB_DROPDOWN)
+            sizer.Add(obj, 0, wx.ALL, 2)
+            
+    def buildChooseCondPriceBar(self):
+        hSizer = wx.BoxSizer(wx.HORIZONTAL)
+        cbx = wx.CheckBox(self, label=u"筛选条件")
+        hSizer.Add(cbx,0,wx.ALL, 2)
+        for chooseCondPriceItem in self.buildChooseCondPriceData():
+            self.buildOneChooseCondPrice(hSizer,chooseCondPriceItem)
+        text = wx.StaticText(self, label='%', style=wx.ALIGN_CENTER)
+        hSizer.Add(text, 0, wx.ALL, 2)
+        return hSizer
+    def buildChooseCondBar(self):
+        box = wx.StaticBox(self, -1, u"筛选条件")
+        staticsizer = wx.StaticBoxSizer(box, wx.VERTICAL)
+        #row1
+        sizer1 = self.buildChooseCondDate()
+        #row2
+        sizer2 = self.buildChooseCondPriceBar()
+        staticsizer.Add(sizer1, 0, wx.ALL, 2)
+        staticsizer.Add(sizer2, 0, wx.ALL, 2)
+        
+        return staticsizer
+    
+    def buildEndCondBar(self):
+        box = wx.StaticBox(self, -1, u"终止条件")
+        staticsizer = wx.StaticBoxSizer(box, wx.VERTICAL)
+        
+        #ROW1
+        sizer1 = self.buildOneEndPrice()
+        #ROW2
+        sizer2 = wx.BoxSizer(wx.HORIZONTAL)
+        for endCondItem in self.creatEndCondData():
+            self.buildOneEndCond(sizer2, endCondItem)
+        staticsizer.Add(sizer1, 0, wx.ALL, 2)
+        staticsizer.Add(sizer2, 0, wx.ALL, 2)
+#        self.SetSizerAndFit(staticSizer)
+#        staticSizer.Fit(self)
+        
+        return staticsizer
+    def buildOneEndCond(self, sizer, endCondItem):
+        for idx, value, eHandler, label in [endCondItem]:
+            sc = wx.SpinCtrl(self, size=(40,-1))
+            sc.SetRange(1,100)
+            sc.SetValue(value)
+            self.Bind(wx.EVT_TEXT, self.EvtCondText, sc)
+            sizer.Add(sc, 0, wx.ALL, 2)
+            text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
+            sizer.Add(text, 0, wx.ALL, 2)
+    def creatEndCondData(self):
+        return (('end', 1, self.EvtEndCond, u'天内至少'),
+                    ('end', 1, self.EvtEndCond, u'天以上满足终止条件且不满足均价关系'))
+    def buildEndPriceData(self):
+        return ((u'收盘价', self.choiceList,2, self.EvtEndCond, self.daysAveList, 5, self.EvtEndCond),
+                        (u'日均价', self.pickList,1, self.EvtEndCond, '', '0', self.EvtEndCond))
+    def buildOneEndPrice(self):
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        cbx = wx.CheckBox(self, label=u'终止条件')
+        self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, cbx)
+        sizer.Add(cbx, 0, wx.ALL, 2)
+        for label, choices, idx1, eHandler1, daychoices, idx2, eHandler2 in self.buildEndPriceData():
+            text = wx.StaticText(self, label=label)
+            sizer.Add(text, 0, wx.ALL, 2)
+            cmbx = wx.ComboBox(self, size=(60, -1), choices=choices, value=choices[idx1],style=wx.CB_DROPDOWN)
+            self.Bind(wx.EVT_COMBOBOX, self.EvtCom1Box, cmbx )
+            
+            cmbx.Disable()
+            sizer.Add(cmbx, 0, wx.ALL, 2)
+            if (daychoices != ''):
+                obj = wx.ComboBox(self, size=(60, -1), choices=daychoices, value=daychoices[idx2],style=wx.CB_DROPDOWN)
+                self.Bind(wx.EVT_COMBOBOX, self.EvtCom1Box, obj )
+            else:
+                obj = wx.TextCtrl(self, value='0', size=(30,-1))
+                self.Bind(wx.EVT_TEXT, self.EvtCondText, obj)   
+            obj.Disable()
+            sizer.Add(obj, 0, wx.ALL, 2)
+        text = wx.StaticText(self, label='%')
+        sizer.Add(text, 0, wx.ALL, 2)
+        return sizer    
+
+    def createAmtErgData(self):
+        return ((u'累计量能达到', '100', self.EvtAmtErg, u'%以上' ),)
+    def createAmtErgBars(self):
+        box = wx.StaticBox(self, -1, u"量能标准")
+        staticsizer = wx.StaticBoxSizer(box, wx.HORIZONTAL)
+        for amountErgItem in self.createAmtErgData():
+            self.createOneAmtErg(staticsizer, amountErgItem)
+        return staticsizer
+    def createOneAmtErg(self, sizer, amountErgItem):
+        for label, value, eventHandler, label2 in [amountErgItem]:
+            text= wx.StaticText(self, label=label)
+            sizer.Add(text, 0, wx.ALL, 2)
+            sc = wx.SpinCtrl(self, size=(40,-1))
+            sc.SetRange(1,100)
+            sc.SetValue(value)
+            self.Bind(wx.EVT_TEXT, eventHandler, sc)    
+            sizer.Add(sc, 0, wx.ALL, 2)
+            text = wx.StaticText(self, label=label2)
+            sizer.Add(text, 0, wx.ALL, 2)
+    
+    def buildAveRelationBars(self):
+        box = wx.StaticBox(self, -1, u"均价关系")
+        staticsizer = wx.StaticBoxSizer(box, wx.VERTICAL)
+        
+        for aveRelationItem in self.buildAveRelationData():
+            sizer = self.buildOneAveRelation(aveRelationItem)
+            staticsizer.Add(sizer, 0, wx.ALL, 2)
+        return staticsizer
+    def buildAveRelationData(self):
+        return ((u'条件一', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
+                    (u'条件二', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
+                    (u'条件三', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
+                    (u'条件四', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
+                    (u'条件五', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
+                    (u'条件六', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox))
+    def buildOneAveRelation(self, aveRelationItem):
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        for cbxLabel, cbxHandler, cmb1idx, cmb1Handler, \
+        cmb2idx, cmb2Handler, cmb3idx, cmb3Handler, \
+        value, textHandler in [aveRelationItem]:
+            cbx = wx.CheckBox(self, label=cbxLabel)
+            self.Bind(wx.EVT_CHECKBOX, cbxHandler, cbx)
+            sizer.Add(cbx, 0, wx.ALL, 2)
+            
+            text = wx.StaticText(self, label=u'收盘价')
+            sizer.Add(text, 0, wx.ALL, 2)
+            
+            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.choiceList, value=self.choiceList[cmb1idx],style=wx.CB_DROPDOWN)
+            self.Bind(wx.EVT_COMBOBOX, cmb1Handler, cmbx )
+            sizer.Add(cmbx, 0, wx.ALL, 2)
+            
+            cmbx = wx.ComboBox(self, size=(40, -1), choices=self.daysAveList, value=self.daysAveList[cmb2idx],style=wx.CB_DROPDOWN)
+            self.Bind(wx.EVT_COMBOBOX, cmb2Handler, cmbx )
+            sizer.Add(cmbx, 0, wx.ALL, 2)
+            
+            text = wx.StaticText(self, label=u'日均价')
+            sizer.Add(text, 0, wx.ALL, 2)
+            
+            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.pickList, value=self.pickList[cmb3idx],style=wx.CB_DROPDOWN)
+            self.Bind(wx.EVT_COMBOBOX, cmb3Handler, cmbx )
+            sizer.Add(cmbx, 0, wx.ALL, 2)
+            
+            textctrl = wx.TextCtrl(self, value=value, size=(30,-1))
+            self.Bind(wx.EVT_TEXT, textHandler, textctrl)
+            sizer.Add(textctrl, 0, wx.ALL, 2)
+            
+            text = wx.StaticText(self, label='%')
+            sizer.Add(text, 0, wx.ALL, 2)
+        return sizer    
+    def EvtCheckBox(self, event):
+        pass
+    def EvtCond1(self, event):
+        pass
+    def EvtCombo1Box(self, event):
+        pass
+    def EvtCombo2Box(self, event):
+        pass
+    def Evtcombo3Box(self, event):
+        pass
+    def EvtCondText(self, event):
+        pass
+    def EvtAmtErg(self, event):
+        pass
+    def EvtCom1Box(self, event):
+        pass
+    def EvtEndCond(self, event):
+        pass
+    def Evt_Startup(self, event):
+        pass
+    def EvtComboBox(self):
+        pass
+    def EvtDatePick(self):
+        pass
+class RightPanel(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        t = wx.StaticText(self, -1, "This is a PageOne object", (20,20))                
+class PageTwo(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        mainsplitter = MultiSplitterWindow(self, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
+        self.splitterpanel1 = LeftPanel(mainsplitter)
+        self.splitterpanel2 = RightPanel(mainsplitter)
+        mainsplitter.SetOrientation(wx.HORIZONTAL)
+        mainsplitter.AppendWindow(self.splitterpanel1, -1)
+        mainsplitter.AppendWindow(self.splitterpanel2, -1)
+        mainsplitter.SetSashPosition(0, 420)
+        mainSizer = wx.BoxSizer(wx.VERTICAL)
+        mainSizer.Add(mainsplitter, 1, wx.EXPAND | wx.ALL)
+        self.SetBackgroundColour("white")
+        self.SetSizer(mainSizer)
+        self.Fit()
 
 class MyFrame(wx.Frame):
     def __init__(self, parent, title=""):
-        
-        wx.Frame.__init__(self, parent, title=title, size=(500, 350))
-        self.panel= wx.Panel(self, wx.ID_ANY)
+        wx.Frame.__init__(self, parent, title=title, size=(1000, 600))
         self.CreateStatusBar()
+        # 1st Generate menus: File, Edit
+#        self.createMenuBar()
+        # Here we create a panel and a notebook on the panel
+        p = wx.Panel(self, wx.ID_ANY)
+        nb = wx.Notebook(p)
         
-        #self.CreateStatusBar()
-        #**************Menu, Button**************
+        # Here we create a panel and a notebook on the panel
+        page1 = PageTwo(nb)
+        page2 = MainPanel(nb)
+#        page1 = PageOne(nb)
         
-        # wx.MenuBar，在你的框架的顶部放一个菜单栏。
-        # wx.Statusbar，在你的框架底部设置一个区域，来显示状态信息等等。
-        # wx.ToolBar，在你的框架中放置一个工具栏
-        # wx.Control的子类，这里面提供了一些控件的用户接口（比如说用来显示数据或者用户输入的可视化控件），常见的wx.Control对象包括wx.Button，wx.StaticText，wx.TextCtrl和wx.ComboBox。
-        # wx.Panel，它是一个容器，可以用来包含你的许多wx.Control对象。将你的wx.Control对象放入一个wx.Panel中，意味着用户可以直接将一对控件从一个可视化器件移动到另一个可视化器件上。  
+        
+        # add the pages to the notebook with the label to show on the tab
+        nb.AddPage(page1, "Page 1")
+        nb.AddPage(page2, "Page 2")
+        
+        # finally, put the notebook in a sizer for the panel to manage
+        # the layout
+        sizer = wx.BoxSizer()
+        sizer.Add(nb, 1, wx.EXPAND)
+        p.SetSizer(sizer)
+        p.Fit()
+        
+        self.SetBackgroundColour("white")
+        self.Layout()
+        
+    def menuData(self):
+        return (("&File",(
+                      ("&Open","Open a file from directory",self.OnOpen),
+                      ("","",""),
+                      ("&About","about this editor",self.OnAbout),
+                      ("","",""),
+                      ("E&xit", "Exit the programer",self.OnExit))),
+                      ("&Edit",(
+                      ("&Font","Change the font", self.OnEditFont),
+                      ("","",""),
+                      ("Dr&aw", "Draw your picture",self.OnEditDraw))))
+    def createMenuBar(self):
+        menuBar = wx.MenuBar()          ##???
+        for eachMenuData in self.menuData():
+            menuLabel = eachMenuData[0]
+            menuItems = eachMenuData[1]
+            menuBar.Append(self.createMenu(menuItems), menuLabel)
+        self.SetMenuBar(menuBar)
+    def createMenu(self,menuItems):
+        menu = wx.Menu()
+        for eachLable, eachStatus, eachhandler in menuItems:
+            if not eachLable:   #for "", add a spacer
+                menu.AppendSeparator()
+                continue
+            menuItem = menu.Append(-1, eachLable, eachStatus)
+            self.Bind(wx.EVT_MENU, eachhandler, menuItem)
+        return menu
+        # About 
+    def OnAbout(self, event):
+        # A message dialog box with an OK button. wx.OK is a standard ID in wxWidgets. 
+        #dlg = wx.MessageDialog( self, "A small text editor", "About Sample Editor", wx.OK)
+        dlg = wx.MessageDialog( self, "A small text editor", "About Sample Editor")    #wx.ID can be omited in this case. wxWidget will assign one automaticlly.
+        dlg.ShowModal()         # Show it
+        dlg.Destroy()             # finally destroy it when finished.
+    # Open
+    def OnOpen(self, event):
+        """ Open a file"""
+        self.dirname = ''
+        dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "*.*", wx.FD_OPEN)    #wx.FD_OPENf for py3.5; wx.OPEN for py2.7
+        # 调用了ShowModal。通过它，打开了对话框。“Modal（模式/模态）”意味着在用户点击了确定按钮或者取消按钮之前，他不能在该程序中做任何事情。ShowModal的返回值是被按下的按钮的ID。如果用户点击了确定按钮，我们就读文件
+        if dlg.ShowModal() == wx.ID_OK:
+            self.filename = dlg.GetFilename()
+            self.dirname = dlg.GetDirectory()
+            f = open(os.path.join(self.dirname, self.filename), 'r')
+            self.control.SetValue(f.read())
+            f.close()
+        dlg.Destroy()
+    # Exit
+    def OnExit(self, e):
+        self.Close(True)            # Close the frame
+    def OnEditFont(self, event):
+        pass
+    def OnEditDraw(self, event):
+        pass
 
-        # 1st menu: File
-        # Setting up the menu.
-        filemenu= wx.Menu() #First Menu, NOT MENU BAR
-        # wx.ID_ABOUT and wx.ID_EXIT are standard IDs provided by wxWidgets.
-        #menu_file_open is used to connect to EVENT
-        menu_file_open = filemenu.Append(wx.ID_ANY, "&Open","Open a file from directory") #wx.ID_ANY can be used for many times. they generate random numbers
-        filemenu.AppendSeparator()
-        menu_file_about = filemenu.Append(wx.ID_ABOUT, "&About","about this editor") 
-        filemenu.AppendSeparator()
-        menu_file_exit = filemenu.Append(wx.ID_EXIT, "E&xit", "Exit the programer")
-        
-        # 2nd menu: Edit
-        # Setting up the menu.
-        editmenu= wx.Menu() #First Menu, NOT MENU BAR
-        menu_edit_Font = editmenu.Append(wx.ID_ABOUT, "&Font","Change the font")
-        editmenu.AppendSeparator()  # add a separator
-        menu_edit_exit = editmenu.Append(wx.ID_ANY, "Dr&aw", "Draw your picture")
-        
-        #3rd menu: TODO
-        # Setting up the menu.
-        # TODO
-        
-        # Creating the menubar.
-        menuBar = wx.MenuBar()
-        menuBar.Append(filemenu,"&File")        # add 1st "filemenu" to the MenuBar
-        menuBar.Append(editmenu, "&Edit")     # add 2nd 'editmenu" to MenuBar
-        #TODO ... add more if needed
-        
-        self.SetMenuBar(menuBar)  # Adding the MenuBar to the Frame content.
-        
-        # Set Event
-        self.Bind(wx.EVT_MENU, self.OnOpen, menu_file_open)
-        self.Bind(wx.EVT_MENU, self.OnExit, menu_file_exit)
-        self.Bind(wx.EVT_MENU, self.OnAbout, menu_file_about)
 
-        
+class MainPanel(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+#        self.panel= wx.Panel(self, wx.ID_ANY)
         self.start_date='2018-10-20'
         self.end_date=datetime.now().strftime("%Y-%m-%d")       #'2018-10-18'
         
         self.autypeStr = 'nfq'         #不复权
         self.days_num = 30
-        
                 
-        self.control = wx.TextCtrl(self.panel, size=(200,100),style=wx.TE_MULTILINE)
-        
+        self.control = wx.TextCtrl(self, size=(200,100),style=wx.TE_MULTILINE)
+        self.SetBackgroundColour("grey")
         startY=0
         startX=0
         
         # create some sizers
-        
         mainSizer = wx.BoxSizer(wx.VERTICAL)
-        grid = wx.GridBagSizer(hgap=2, vgap=5)
-        hSizer = wx.BoxSizer(wx.HORIZONTAL)
-#        hSizer = wx.BoxSizer(wx.VERTICAL)
+        grid = wx.GridBagSizer(hgap=5, vgap=5)
+        hSizer = wx.BoxSizer(wx.HORIZONTAL)     #wx.VERTICAL
 
 #        self.quote = wx.StaticText(self, label="STOCK QUANT V0.01 ")
 #        grid.Add(self.quote, pos=(startY,startX))
 
         # A multiline TextCtrl - This is here to show how the events work in this program, don't pay too much attention to it
-        self.logger = wx.TextCtrl(self.panel, size=(200,200), style=wx.TE_MULTILINE | wx.TE_READONLY)
+        self.logger = wx.TextCtrl(self, size=(200,200), style=wx.TE_MULTILINE | wx.TE_READONLY)
+        
+        # 2nd Generate textCtrls        
+#        self.textCtrlHooks=[]
+        self.textCtrlFields={}
+        self.idx_START_DATE, self.idx_END_DATE, self.idx_WORK_DAY = range(3)
+        self.createDateTextBar(self, grid, yPos=0)
 
         startY-=1
-        # Start date
-        self.lblstartdate = wx.StaticText(self.panel, label="Start Date :")
-        grid.Add(self.lblstartdate, pos=(startY+1,startX))
-        self.editstartdate = wx.TextCtrl(self.panel, value=self.start_date, size=(80,-1))
-        grid.Add(self.editstartdate, pos=(startY+1,startX+1))
-        self.Bind(wx.EVT_TEXT, self.Evt_StartDate, self.editstartdate)
-        #self.Bind(wx.EVT_CHAR, self.EvtChar, self.editstartdate)
-               
+              
         startY+=1
-                
-        # End date
-        self.lblenddate = wx.StaticText(self.panel, label="End Date :")
-        grid.Add(self.lblenddate, pos=(startY+1,startX))
-        self.editenddate = wx.TextCtrl(self.panel, value=self.end_date, size=(80,-1))
-        grid.Add(self.editenddate, pos=(startY+1,startX+1))
-        self.Bind(wx.EVT_TEXT, self.Evt_EndDate, self.editenddate)      
-        #self.Bind(wx.EVT_CHAR, self.EvtChar, self.editenddate)
+
 
         startY+=1
-        
-        # Days number
-        self.lbldaysnum = wx.StaticText(self.panel, label="Work days")
-        grid.Add(self.lbldaysnum, pos=(startY+1,startX))
-        self.editdaysnum = wx.TextCtrl(self.panel, size=(40,-1))
-        grid.Add(self.editdaysnum, pos=(startY+1,startX+1))
-        self.Bind(wx.EVT_TEXT, self.Evt_DaysNum, self.editdaysnum)
+
         
         startY+=1
         
         # Button: Update Data
         self.HQonoff=1          #used to stop self.hq.updateHQdata
-        self.updateBtnStatus = 'Update Data'        #'Stop'
-        self.updateHQbuttons = wx.Button(self.panel, -1, "Update Data")        # add buttons
+        self.updateBtnStatus = 'Update Data'        #or 'Stop'
+        self.updateHQbuttons = wx.Button(self, -1, "Update Data")        # add buttons
         grid.Add(self.updateHQbuttons, pos=(startY+1,startX))
         self.Bind(wx.EVT_BUTTON, self.Evt_UpdateButton, self.updateHQbuttons)      
         
         # Gauge
         self.gaugecount=0
-        self.gauge = wx.Gauge(self.panel,-1, G_NUM_OF_CODES, size=(80,20))
+        self.gauge = wx.Gauge(self,-1, G_NUM_OF_CODES, size=(80,20))
         grid.Add(self.gauge, pos=(startY+1, startX+1))
         self.Bind(wx.EVT_IDLE, self.GaugeOnIdle, self.gauge)
         self.gauge.SetValue(self.gaugecount)
-        self.gauge.Disable()
+#        self.gauge.Disable()
+#        self.gauge.Hide()
         
         startY+=1
         
         #Radio boxes: auType, qfq, hfq, bfq
         self.auTypeList= ['nfq', 'qfq', 'hfq']
-        self.auTyperbx = wx.RadioBox(self.panel, label="Data Type", pos=(startY+1, startX+ 1), choices=self.auTypeList,  majorDimension=3,
+        self.auTyperbx = wx.RadioBox(self, label="Data Type", pos=(startY+1, startX+ 1), choices=self.auTypeList,  majorDimension=3,
                          style=wx.RA_SPECIFY_ROWS)
         grid.Add(self.auTyperbx, pos=(startY+1,startX), span=(1,2))
         self.Bind(wx.EVT_RADIOBOX, self.EvtTypeRadioBox, self.auTyperbx)
@@ -604,61 +927,36 @@ class MyFrame(wx.Frame):
         
         # the combobox Control
         self.sampleList = ['friends', 'advertising', 'web search', 'Yellow Pages']
-        self.lblhear = wx.StaticText(self.panel, label="How did you hear from us ?")
+        self.lblhear = wx.StaticText(self, label="How did you know us ?")
         grid.Add(self.lblhear, pos=(startY+3,startX))
-        self.edithear = wx.ComboBox(self.panel, size=(95, -1), choices=self.sampleList, style=wx.CB_DROPDOWN)
+        self.edithear = wx.ComboBox(self, size=(95, -1), choices=self.sampleList, style=wx.CB_DROPDOWN)
         grid.Add(self.edithear, pos=(startY+3,startX+1))
         self.Bind(wx.EVT_COMBOBOX, self.EvtComboBox, self.edithear)
         self.Bind(wx.EVT_TEXT, self.Evt_StartDate,self.edithear)
 
-        
-
         # Checkbox
-        self.insure = wx.CheckBox(self.panel, label="Do you want Insured Shipment ?")
+        self.insure = wx.CheckBox(self, label="Do you want Insured Shipment ?")
         grid.Add(self.insure, pos=(startY+4,startX), span=(1,2), flag=wx.BOTTOM, border=5)
         self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, self.insure)
         #self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, self.OnChecked)
 
         # Radio Boxes
         radioList = ['blue', 'red', 'yellow', 'orange', 'green', 'purple', 'navy blue', 'black', 'gray']
-        rb = wx.RadioBox(self.panel, label="What color would you like ?", pos=(startY+20, startX+ 210), choices=radioList,  majorDimension=3,
+        rb = wx.RadioBox(self, label="What color would you like ?", pos=(startY+20, startX+ 210), choices=radioList,  majorDimension=3,
                          style=wx.RA_SPECIFY_COLS)
         grid.Add(rb, pos=(startY+5,startX), span=(1,2))
         self.Bind(wx.EVT_RADIOBOX, self.EvtRadioBox, rb)
-    
-        
-        # SIZER####################
-        # wx.BoxSizer，以水平或垂直的方式将控件放置在一条线上。
-        # wx.GridSizer，将控件以网状结构放置。
-        # wx.FlexGridSizer，它和wx.GridSizer相似，但是它允许以更加灵活的方式放置可视化控件
+
         self.sizer2 = wx.BoxSizer(wx.HORIZONTAL)    #ob2
         self.buttons = []
         for i in range(0, 3):
-            self.buttons.append(wx.Button(self.panel,-1, "Button &"+str(i)))        # add buttons
+            self.buttons.append(wx.Button(self,-1, "Button &"+str(i)))        # add buttons
             self.sizer2.Add(self.buttons[i], 1, wx.EXPAND)    # Add several buttons in sizer2; para=1 means 1:1:1.., try 'i'
         # A button
-        self.button =wx.Button(self.panel, label="Save")
+        self.button =wx.Button(self, label="Save")
         self.Bind(wx.EVT_BUTTON, self.OnClick,self.button)
         # Use some sizers to see layout options
-        
-        #self.sizer = wx.BoxSizer(wx.VERTICAL)        #obj 1
-        #self.sizer = wx.BoxSizer(wx.HORIZONTAL)
-        #grid.Add(self.control, pos=(6,0))
-        #Grid.Add(self.sizer2, pos=(7,0))
-        #self.sizer.Add(self.control, 1, wx.EXPAND)    # add control panel. Add(PanelName, size(in portion), type). 4:1
-        # also see wx.GROW, wx.SHAPED
-        # also see wx.ALIGN_CENTER_HORIZONTAL, wx.ALIGN_CENTER_VERICAL
-        # also see wx.ALIGN_LEFT,wx.ALIGN_TOP,wx.ALIGN_RIGHT和wx.ALIGN_BOTTOM中选择几个作为一个组合。默认的行为是wx.ALIGN_LEFT | wx.ALIGN_TOP
-        #self.sizer.Add(self.sizer2, 1, wx.EXPAND)    # sizer2 in sizer, try '-1'(don't change size)
 
-        #Layout sizers
-        # 建立了你的可视化控件之后并将它们添加到sizer（或者嵌套的sizer）里面，下一步就是告诉你的框架或者窗口去调用这个sizer，你可以完成这个，用以下三步
-        #self.SetSizer(self.sizer)    # 告诉你的窗口或框架去使用这个sizer
-        #self.SetAutoLayout(1)    # 告诉你的窗口使用sizer去为你的控件计算位置和大小
-        #self.sizer.Fit(self)            # 计算所有控件的初始位置和大小
-        # SIZER END ##################
-        
-    
         #hSizer = grid + logger, mainSizer = hSizer + Button.
         hSizer.Add(grid, 0, wx.ALL, 5)
         hSizer.Add(self.logger, 0, wx.ALL, 5)
@@ -668,27 +966,72 @@ class MyFrame(wx.Frame):
         #mainSizer.Add(self.sizer, 0, wx.ALL, 5)
 
         mainSizer.Add(self.button, 0, wx.CENTER)
-        self.panel.SetSizerAndFit(mainSizer)
-        
+        self.SetSizerAndFit(mainSizer)
+        self.gauge.Hide()
 #        self.hq = hqdata.HqDataHandler(self)
         self.hq = HqDataHandler(self)
+#        self.model = SimpleDBName()
         pub.subscribe(self.updateDisplay, "update")
+#        self.Refresh()
+###### Model ######
+    def updateStartDate(self, model):
+        self.textCtrlFields["start date:"].SetValue(model.start_date)
 
+
+###### Viewer ######
+    def dateTextData(self):
+        #label, size, value, handler
+        return (("start date", (80, -1), self.start_date, self.Evt_StartDate),
+                     ("end date", (80, -1), self.end_date, self.Evt_EndDate),
+                     ("work days", (40, -1), '', self.Evt_DaysNum))
+    def createDateTextBar(self, panel, grid, yPos=0):
+        for dateTextItem in self.dateTextData():
+            self.buildOneDateText(panel,grid, yPos, dateTextItem)
+            yPos+=1
+    def buildOneDateText(self, panel, grid, yPos, dateTextItem):
+        for label, size, value, handler in [dateTextItem]:
+            text = wx.StaticText(panel, label=label)
+            grid.Add(text, pos=(yPos, 0))
+            textctrl = wx.TextCtrl(panel, value=value, size=size)
+            self.textCtrlFields[label]=textctrl
+#            self.textCtrlHooks.append(textctrl)
+            grid.Add(textctrl, (yPos, 1))
+            self.Bind(wx.EVT_TEXT, handler, textctrl)
+            
+
+    def buttonData(self):
+        return(("Update Data", self.Evt_UpdateButton))   
+    def createButtonBar(self, panel, grid, yPos = 0):
+        xPos = 0
+        for eachLable, eachHandler in self.buttonData():
+            pos = (yPos, xPos)
+            button = self.buildOneButton(panel, grid, eachLable, eachHandler)
+            xPos +=button.GetSize().width
+            grid.Add(button, pos)
+    def buildOneButton(self, parent, label, handler, pos=(0,0)):
+        button = wx.button(parent, -1, label, pos)
+        self.Bind(wx.EVT_BUTTON, handler, button)
+        return button
     
+###### Controller ###### 
+  
     def Evt_UpdateButton(self, event):
         if (self.updateBtnStatus == 'Update Data'):
             self.HQonoff=1
             self.updateBtnStatus = 'Stop'
             self.updateHQbuttons.SetLabel(self.updateBtnStatus)
-            self.editstartdate.Disable()
-            self.editenddate.Disable()
+#            for textCtrlHook in self.textCtrlHooks:
+#                textCtrlHook.Disable()
+            for label in self.textCtrlFields:
+                self.textCtrlFields[label].Disable()
+#            self.editstartdate.Disable()
+#            self.editenddate.Disable()
 #            self.updateHQbuttons.Disable()
-            self.editdaysnum.Disable()
             self.auTyperbx.Disable()        #not work, why?
     
             self.gaugecount = 0
             self.gauge.SetValue(self.gaugecount)
-            
+            self.gauge.Show()
             self.logger.AppendText('Evt_UpdateButton\n')
             self.logger.AppendText('hq update start\n')
             t = threading.Thread(target=self.hq.updateHQdata, args=())
@@ -731,26 +1074,23 @@ class MyFrame(wx.Frame):
         if isinstance(msg, str):
             if msg == "endHQupdate":
                 #self.logger.AppendText("enable menu,msg=%s\n"%msg)
+#                for textCtrlHook in self.textCtrlHooks:
+#                    textCtrlHook.Enable()
+                for label in self.textCtrlFields:
+                    self.textCtrlFields[label].Enable()
                 
-                self.editstartdate.Enable()
-                self.editenddate.Enable()
                 self.updateHQbuttons.Enable()
                 self.auTyperbx.Enable()
-                self.editdaysnum.Enable()
+
+                self.gauge.Hide()
                 self.gaugecount = 0
                 self.gauge.SetValue(self.gaugecount)
+                
                 self.updateBtnStatus = 'Update Data'
                 self.updateHQbuttons.SetLabel(self.updateBtnStatus)
-                #self.logger.AppendText('hq update end\n')
-#            elif msg == "disableMenu":
-#                self.logger.AppendText("disable menus,msg=%s"%msg)
-#                self.editstartdate.Disable()
-#                self.editenddate.Disable()
-#                #self.updateHQbuttons.Disable()
-#                self.editdaysnum.Disable()
-#                self.auTyperbx.Enable(False)        #not work, why?
+
         elif isinstance(msg, int):
-#            self.logger.AppendText('gauge %d\n'%msg)
+            #self.logger.AppendText('gauge %d\n'%msg)
             self.gaugecount = msg
             self.gauge.SetValue(self.gaugecount)
             
@@ -778,13 +1118,16 @@ class MyFrame(wx.Frame):
             pass
         else:
             try:
+                self.logger.AppendText('Evt_DaysNum: %s\n' % event.GetString())
                 self.days_num = int(event.GetString())
 #                self.start_date = (datetime.now()-timedelta(days=self.days_num)).strftime("%Y-%m-%d")
                 self.start_date=self.get_startdate_byworkday(self.end_date, self.days_num)
-                self.editstartdate.SetValue(self.start_date)
+#                self.textCtrlHooks[self.idx_START_DATE].SetValue(self.start_date)
+                self.textCtrlFields["start date"].SetValue(self.start_date)
             except Exception as e:
                 print(e)
-                self.editdaysnum.SetValue('')
+#                self.textCtrlHooks[self.idx_WORK_DAY].SetValue('')
+                self.textCtrlFields["work days"].SetValue('')
         self.logger.AppendText('Evt_DaysNum: %s\n' % event.GetString())
     def Evt_EndDate(self, event):
         self.end_date = event.GetString()
@@ -796,37 +1139,13 @@ class MyFrame(wx.Frame):
         self.logger.AppendText('EvtCheckBox: %d\n' % event.IsChecked())    #IsChecked(), not OnChecked. https://docs.wxpython.org/wx.CheckBox.html?highlight=checkbox
     
     def GaugeOnIdle(self):
-        self.logger.AppendText('GaugeOnIdle\n' )
-        self.gaugecount = self.gaugecount + 1
-        if self.gaugecount >= G_NUM_OF_CODES+10:
-            self.gaugecount = 0
-        self.gauge.SetValue(self.gaugecount)
+#        self.logger.AppendText('GaugeOnIdle\n' )
+#        self.gaugecount = self.gaugecount + 1
+#        if self.gaugecount >= 80:
+#            self.gaugecount = 0
+#        self.gauge.SetValue(self.gaugecount)
+        pass
     
-    
-    # About 
-    def OnAbout(self, event):
-        # A message dialog box with an OK button. wx.OK is a standard ID in wxWidgets. 
-        #dlg = wx.MessageDialog( self, "A small text editor", "About Sample Editor", wx.OK)
-        dlg = wx.MessageDialog( self, "A small text editor", "About Sample Editor")    #wx.ID can be omited in this case. wxWidget will assign one automaticlly.
-        dlg.ShowModal()         # Show it
-        dlg.Destroy()             # finally destroy it when finished.
-    # Open
-    def OnOpen(self, event):
-        """ Open a file"""
-        self.dirname = ''
-        dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "*.*", wx.FD_OPEN)    #wx.FD_OPENf for py3.5; wx.OPEN for py2.7
-        # 调用了ShowModal。通过它，打开了对话框。“Modal（模式/模态）”意味着在用户点击了确定按钮或者取消按钮之前，他不能在该程序中做任何事情。ShowModal的返回值是被按下的按钮的ID。如果用户点击了确定按钮，我们就读文件
-        if dlg.ShowModal() == wx.ID_OK:
-            self.filename = dlg.GetFilename()
-            self.dirname = dlg.GetDirectory()
-            f = open(os.path.join(self.dirname, self.filename), 'r')
-            self.control.SetValue(f.read())
-            f.close()
-        dlg.Destroy()
-    # Exit
-    def OnExit(self, e):
-        self.Close(True)            # Close the frame
-
 
 class UI(object):
     def __init__(self):
@@ -837,9 +1156,12 @@ class UI(object):
     def ui_init(self, title="Stock Quant V0.01"):
         self.app = wx.App(False)  # Create a new app, don't redirect stdout/stderr to a window.
         self.frame = MyFrame(None, title=title)  # A Frame is a top-level window. , size=(200,-1)
-        #self.panel = MainWindow(self.frame)
+#        self.panel = MainPanel(self.frame)
+            
+        
         self.frame.Show()
-        self.frame.Center()
+        self.app.SetTopWindow(self.frame)
+        #self.frame.Center()
         return self.frame, self.panel
 
     def ui_run(self):
