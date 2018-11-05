@@ -5,6 +5,9 @@ add model to 'updateData'
 add threading.event to 'stop' button
 '''
 
+
+import dataworker
+G_NUM_OF_CODES=3
 import sys
 import os
 import wx
@@ -74,6 +77,7 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s: %(message
 handler = logging.FileHandler('trace.log',mode='a')
 handler.setLevel(logging.DEBUG)
 handler.setFormatter(formatter)
+#debug, info, warn, error, critical
 
 # create a logging in console
 formatterconsole = logging.Formatter('%(message)s')
@@ -90,417 +94,9 @@ if logger.hasHandlers() is False:
 
 # Global variable definition here
 
-G_NUM_OF_CODES = 3      #3625
+
 
 #sql_get_codes = "SELECT code FROM '%s'"
-
-class TestThread(threading.Thread):
-    def __init__(self):
-        """Init Worker Thread Class."""
-        Thread.__init__(self)
-        self.start()    # start the thread
-
-    def run(self):
-        """Run Worker Thread."""
-        # This is the code executing in the new thread.
-        for i in range(6):
-            time.sleep(10)
-            wx.CallAfter(self.postTime, i)
-        time.sleep(5)
-        wx.CallAfter(pub.sendMessage, "update", msg="Thread finished!")
-
-    def postTime(self, amt):
-        """
-        Send time to GUI
-        """
-        amtOfTime = (amt + 1) * 10
-        pub.sendMessage("update", msg=amtOfTime)
-
-
-# Class definition here
-class AbstractModel(object):
-    def __init__(self):
-        self.listeners = []
-    def addListener(self, listenerFunc):
-        self.listeners.append(listenerFunc)
-    def removeListener(self, listenerFunc):
-        self.listeners.remove(listenerFunc)
-    def update(self):   #定义，子类找到父类方法，但self指向的是子类的实例，不是父类实例，也不是子类。
-        for eachFunc in self.listeners:
-            print(self)
-            #在继承时，传入的是哪个实例，就是那个传入的实例，而不是指定义了self的类的实例
-            eachFunc(self)  #这是调用，不是定义，self指向子类实例(frame.model)
-class SimpleName(AbstractModel):
-    def __init__(self, first="", last=""):
-        AbstractModel.__init__(self)
-        self.set(first, last)
-    def set(self, first, last):
-        self.first = first
-        self.last = last
-        self.update() #1 更新, 这是方法调用，不需要self作为参数，子类中没有update方法，向父类寻找
-
-#class SimpleDBName(AbstractModel):
-#    def __init__(self, dbName=""):
-#        AbstractModel.__init__(self)
-#        self.set(dbName)
-#    def set(self, dbName):
-#        self.dbName = dbName
-#        self.update() #1 更新, 这是方法调用，不需要self作为参数，子类中没有update方法，向父类寻找
-
-
-class HqDataHandler():
-    def __init__(self,menu):
-        self.menu = menu
-        self.sql_filename_base = 'hqData.db'
-        self.sql_filename = self.sql_filename_base
-        self.date_tail = '00:00:00.000000'
-        self.start_date='2018-10-15'
-        self.end_date = datetime.now().strftime("%Y-%m-%d")
-        self.current_date = datetime.now().strftime("%Y-%m-%d")
-#        self.engine = create_engine('sqlite+pysqlite:///%s'%self.sql_filename, module=sqlite)
-        #self.engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite)
-#        self.engine = create_engine('sqlite+pysqlite:///file.db', module=sqlite)
-        self.update_DB_and_autype()
-        self.hq_codes = self.get_codes()
-        self.tablenm_hqall='hqall_t'
-        pass
-        
-    
-    def update_DB_and_autype(self):
-        if (self.menu.autypeStr == 'nfq'):
-            self.autype=None
-        elif (self.menu.autypeStr == 'hfq'):
-            self.autype='hfq'
-        elif (self.menu.autypeStr == 'qfq'):
-            self.autype='qfq'
-        self.sql_filename = self.menu.autypeStr+'_'+self.sql_filename_base
-        self.engine = create_engine('sqlite+pysqlite:///%s'%self.sql_filename, module=sqlite)
-        self.initDB()
-        logger.debug("change to %s database and engine",self.sql_filename)
-        
-#    def get_hist_k_data(self):
-#        pass
-#    #engine = create_engine("sqlite:///:memory:", echo=True)
-#        f = ts.get_k_data('000673', '2018-10-08', '2018-10-17')
-    
-    def checkDateTableExist(self,date=None):
-        if (date==None):
-            date = datetime.now().strftime("%Y-%m-%d")
-        query = "select count(*)  from sqlite_master where type='table' and name = '%s'"%date
-        logger.debug("query = %s", query)
-        counter = list(self.engine.execute(query).fetchone())[0]
-        logger.debug("counter of %s is %d", date, counter)
-        if counter>0:
-            return True
-        elif counter==0:
-            return False
-        
-        for i in counter:
-            print(i)
-
-    def filter_date(self, startDateStr, endDateStr):
-        """Return the list of modified date as [startdate as next workday, enddate as previous workday]
-        """
-        startDate = datetime.strptime(startDateStr, "%Y-%m-%d")
-        endDate = datetime.strptime(endDateStr, "%Y-%m-%d")
-        startDays = startDate.isoweekday()
-        if (startDays in [6,7]):
-            newStartStr = (startDate+timedelta(days=(8-startDays))).strftime("%Y-%m-%d")
-        else:
-            newStartStr=startDateStr
-        # endDays        
-        endDays = endDate.isoweekday()
-        if (endDays in [6,7]):
-            newEndStr = (endDate+timedelta(days=(5-endDays))).strftime("%Y-%m-%d")
-        else:
-            newEndStr=endDateStr
-        logger.debug("filtered menu date: [%s, %s]",newStartStr, newEndStr)
-        return [newStartStr, newEndStr]
-
-    def updateHQdata(self):
-        pub.sendMessage("update", msg="disableMenu")
-        #TODO: verify validation of start_date, end_date
-        i=0
-        target_span=self.filter_date(self.menu.start_date, self.menu.end_date)
-        for code in self.hq_codes:
-            i+=1
-            pub.sendMessage("update", msg=i)
-            #logger.debug("gauge=%d",i)
-            dateSpans=self.get_dateSpans(code, target_span)
-            try:
-                logger.debug("get %s hq data, start", code)
-                print(dateSpans)
-                for span in dateSpans:
-                    if (self.menu.HQonoff==1):
-                        if (self.autype == 'qfq'):
-                            df = ts.get_h_data(code, start=span[0], end=span[1], retry_count=3, pause=5)
-                        else:
-                            df = ts.get_h_data(code, start=span[0], end=span[1], autype=self.autype, retry_count=3, pause=5)
-#                        time.sleep(2)
-                        #add a columen code
-                        df['code']=code
-                        print(df)
-                        #df.to_sql("_%s"%code,self.engine, if_exists='append',index=True)
-                        df.to_sql("%s"%self.tablenm_hqall,self.engine, if_exists='append',index=True)
-                        logger.debug("write %s to DB",code)
-                    else:
-                        #(self.menu.HQonoff==0):        #stop
-                        pub.sendMessage("update", msg="endHQupdate")        #clear gauage counter
-                        logger.info("updateHQdata() is stopped by setting HQonoff 1")
-                        return
-                #delete duplicate line
-                cmd_del = "delete from _%s where rowid not in(select max(rowid) from _%s group by date)"%(code,code)
-                #self.engine.execute(cmd_del)
-                #TODO: need to check, enable or disable below
-            except OSError as e:
-                #network issue
-                logger.info(e)
-                time.sleep(60)
-            except Exception as e:
-                logger.info(e)
-            
-            if (i>=G_NUM_OF_CODES):
-#            if (i>=3):
-                pub.sendMessage("update", msg="endHQupdate")
-                break
-        pub.sendMessage("update", msg="endHQupdate")            
-            
-    def read_from_DB(self):
-        tablenm = self.tablenm_hqall
-        date = "2018-10-18"
-        #date_tail='00:00:00.000000'
-        #tablenm = "hqall_t"
-        # read DataFrame by code
-        rd_cmd = "SELECT * FROM %s where code = %s"%(tablenm, code)
-        df = pd.read_sql(rd_cmd, self.engine)
-        
-        # read DataFrame by 'TimeStr'
-        rd_cmd = "SELECT * FROM %s where date = '%s %s'"%(tablenm, date, self.date_tail)
-        df = pd.read_sql(rd_cmd, self.engine)
-        
-        print(df)
-    
-    def get_dateSpans(self, code=None, target_span=None):
-        dateSpans=[]
-        if (target_span==None):
-            start_date_menu = self.menu.start_date
-            end_date_menu = self.menu.end_date
-        else:
-            start_date_menu = target_span[0]
-            end_date_menu = target_span[1]
-        logger.debug("start_date_menu = %s, end_date_menu=%s",start_date_menu, end_date_menu)
-        try:
-            # get sqlite3 time in str
-#            cmd1 = "SELECT MIN(date) FROM _%s"%code                                                                    #1 code in 1 table
-            cmd1 = "SELECT MIN(date) FROM %s where code = %s"%(self.tablenm_hqall, code)            #all codes in 1 table
-            start_date_db= self.engine.execute(cmd1).fetchall()[0][0][:10]
-            #days-1
-            start_date_db = (datetime.strptime(start_date_db, "%Y-%m-%d")+timedelta(days=-1)).strftime("%Y-%m-%d")
-            
-#            cmd2 = "SELECT MAX(date) FROM _%s"%code
-            cmd2 = "SELECT MAX(date) FROM %s where code = %s"%(self.tablenm_hqall, code)            #all codes in 1 table
-            end_date_db= self.engine.execute(cmd2).fetchall()[0][0][:10]
-            end_date_db = (datetime.strptime(end_date_db, "%Y-%m-%d")+timedelta(days=1)).strftime("%Y-%m-%d")
-            #end_date_db = datetime.strptime(b, "%Y-%m-%d")
-            logger.debug("start_date_db = %s, end_date_db=%s",start_date_db, end_date_db)
-            
-            if (end_date_menu<=start_date_db):
-                #status 1:
-                logger.debug("status 1")
-                dateSpans.append([start_date_menu,end_date_menu])
-            elif (start_date_menu>=end_date_db):
-                # status 2, same as 1
-                logger.debug("status 2")
-                dateSpans.append([start_date_menu, end_date_menu])
-            elif (start_date_menu<start_date_db)&(end_date_menu>start_date_db)&(end_date_menu<end_date_db):
-                #status 5
-                logger.debug("status 5")
-                dateSpans.append([start_date_menu,start_date_db] )
-            elif (start_date_db<=start_date_menu)&(start_date_menu<=end_date_db)&(end_date_db<=end_date_menu):
-                #status 6
-                logger.debug("status 6")
-                dateSpans.append([end_date_db, end_date_menu])
-            elif (start_date_db<=start_date_menu)&(end_date_menu<=end_date_db):
-                #status 8
-                logger.debug("status 8")
-                pass
-            elif (start_date_menu<=start_date_db)&(end_date_db<=end_date_menu):
-                #status 9
-                logger.debug("status 9")
-                dateSpans.append([start_date_menu, start_date_db])
-                dateSpans.append([end_date_db, end_date_menu])
-        except Exception as e:
-            #7. No data in dB
-            logger.debug("status 9")
-            dateSpans.append([start_date_menu, end_date_menu])
-        
-        # remove the day of week end
-        filtered_dateSpans=[]
-        for dateSpan in dateSpans:
-            filteredSpan = self.filter_date(dateSpan[0], dateSpan[1])
-            if filteredSpan[0]<=filteredSpan[1]:
-                filtered_dateSpans.append(filteredSpan)
-        
-        return filtered_dateSpans
-            
-    def getTodayAllData(self):
-        date = datetime.now().strftime("%Y-%m-%d")
-        filename = date+'.csv'
-        repeat_counter = 0
-        #if not os.path.exists(filename):
-        if (not self.checkDateTableExist(date)):
-            while True:
-                try:
-                    repeat_counter +=1
-                    hqTodayDataAll = ts.get_today_all()
-#                    hqTodayDataAll = ts.get_k_data('000673', '2018-10-08', '2018-10-17')
-                    hqTodayDataAll.to_csv(filename)
-                    self.writeSqlite(hqTodayDataAll, date)
-                    break
-                except ValueError as e:
-                    logger.info("Exception: %s",e)
-                    break
-                except Exception as e:
-                    logger.info("Exception: %s",e)
-                    if (repeat_counter >=5):
-                        break   # fail to get data for 5 tries, raise an exception
-                    else:
-                        continue
-        else:
-            logger.debug("%s data already exists in %s", date, 'hsData.db')
-        logger.debug("repeat_counter is %d", repeat_counter)
-        pass
-        
-    def writeSqlite(self, df, table_nm=None):
-        if (table_nm==None):
-            table_nm = datetime.now().strftime("%Y-%m-%d")
-        df.to_sql(table_nm, self.engine)
-        logger.info("success: write hq date at %s",table_nm)
-        
-    def get_codes(self,table_nm=None):
-        codes = []
-        if (table_nm==None):
-            #table_nm = datetime.now().strftime("%Y-%m-%d")
-            table_nm = "codes_t"
-        sqlcmd_get_codes = "SELECT code FROM '%s'"%table_nm
-        try: 
-            r = self.engine.execute(sqlcmd_get_codes)
-        except Exception as e:
-            logger.debug(e)
-            self.initDB()
-            #self.saveCodes_fromCSV_toDB()
-            r = self.engine.execute(sqlcmd_get_codes)
-        #for i in r.fetchall():
-        for i in r:
-            codes.append(list(i)[0])
-        #print(codes)
-        return codes
-    def isWeekDay(self, str_time):
-        date = datetime.strptime(str_time, "%Y-%m-%d")
-        return date.isoweekday()
-    def generate_codes_csv(self, filename = 'codes_table.csv', maxcounter=5):
-        assert(isinstance(filename, str))
-        assert(isinstance(maxcounter, int))
-        repeat_counter = 0
-        ret = False
-        while True:
-            try:
-                repeat_counter +=1
-                hqDataAll = ts.get_today_all()
-                # success
-                logger.debug("get_today_all success!")
-                df=hqDataAll['code']
-                hqDataAll['code'].to_csv('codes_table.csv')
-                ret = True
-                break
-            except ValueError as e: 
-                logger.info(e)
-                break
-            except Exception as e:
-                logger.debug(e)
-                if (repeat_counter >=maxcounter):
-                    break   # fail to get data for 5 tries, raise an exception
-                else:
-                    continue
-        return ret
-    def initDB(self):
-        """Generate 'codes_t', which has all stock codes, into sqlite_db if there is no 'codes_t' in sqlite_db"""
-        # 1. check if 'codes_t' exists
-        cmd = "select count(*)  from sqlite_master where type='table' and name = '%s'"%'codes_t'
-        if ((self.engine.execute(cmd).fetchall()[0][0])==0):
-            # 2. 'codes_t' not exists, check if 'codes_table.csv' exists. Try to generate 'codes_t' from 'codes_table.csv'
-            # 2.1 check if 'codes_table.csv' exists, generate one if not using get_today_all()
-            if (not os.path.isfile('codes_table.csv')):
-                #generate 'codes_table.csv' using get_today_all()
-                self.generate_codes_csv('codes_table.csv', 5)
-            # 2.2 check if 'codes_table.csv' exists, generate 'codes_t' in DB if exists, raise an error if not.
-            if (os.path.isfile('codes_table.csv')):
-                # generate 'codes_t' from 'codes_table.csv'
-                codes_df = pd.read_csv('codes_table.csv', dtype='str',names=['id','code'])
-                try:
-                    codes_df["code"].to_sql('codes_t', self.engine)
-                except ValueError as e:
-                    logger.info(e)
-                except Exception as e:
-                    logger.info(e)
-            else: 
-                # raise an error, 'codes_table.csv' fails, try again
-                logger.error('fail to generate codes_table.csv, try again')
-                assert (1==0)
-    
-#    def initCodeTable(self, flag='ifexist'):
-##        date = datetime.now().strftime("%Y-%m-%d")
-##        code_df = pd.DataFrame(r.fetchall(), columns=['code'])
-#        cmd_get_codes = "SELECT code FROM codes_t"
-#        try:
-#            assert(flag=='ifnotexist')
-#            r = self.engine.execute(cmd_get_codes)
-#            # codes_t exists in engine, pass
-#            pass
-#        except Exception as e:
-#            #force to init codes_t from csv
-#            logger.debug(e)
-#            logger.debug("engine does not have codes_t, init code_t from csv")
-#            try:
-#                code_df = pd.read_csv('codes_table.csv', dtype=object)
-#                try:
-#                    #code_df.to_csv('codes_table.csv')
-#                    code_df["code"].to_sql('codes_t', self.engine)
-#                except ValueError as e:
-#                    logger.info("Exception: %s",e)
-#                except Exception as e:
-#                    logger.info("Exception: %s",e)
-#            except Exception as e:
-#                logger.error("codes_table.csv does not exist")
-#        
-#    
-#    def saveCodes_fromCSV_toDB(self):
-#        try:
-#            codes_df = pd.read_csv('codes_table.csv', dtype='str')
-#            try:
-#                #code_df.to_csv('codes_table.csv')
-#                codes_df["code"].to_sql('codes_t', self.engine)
-#            except ValueError as e:
-#                logger.info("Exception: %s",e)
-#            except Exception as e:
-#                logger.info("Exception: %s",e)
-#        except Exception as e:
-#            logger.error("codes_table.csv does not exist")
-#        
-#    def saveLatestCodes_tocsv(self):
-#        date = datetime.now().strftime("%Y-%m-%d")
-##        date = '2018-10-17'
-#        sqlcmd_get_codes = "SELECT code FROM '%s'"%date
-#        try:
-#            r = self.engine.execute(sqlcmd_get_codes)
-#            code_df = pd.DataFrame(r.fetchall(), columns=['code'])
-#            code_df.to_csv('codes_table.csv')
-#            logger.debug("codes saves to cdoes_table.csv")
-##        except OperationalError as e:
-##            logger.warning("read %s from %s error: %s", date, self.sql_filename, e)
-#        except Exception as e:
-#            logger.warning("read %s from %s error: %s", date, self.sql_filename, e)
-    
 
 import wx
 import os
@@ -1146,7 +742,7 @@ class MyFrame(wx.Frame):
         
         # Here we create a panel and a notebook on the panel
         page1 = PickByEnergy(nb)
-        page2 = DnldStockData(nb)
+        page2 = DnldHQDataPanel(nb)
         page3 = PageThree(nb)
 
         
@@ -1224,33 +820,233 @@ class MyFrame(wx.Frame):
     def OnEditDraw(self, event):
         pass
 
-class Viewer(object):
-    def __init__(self):
+class Viewer(wx.Frame):
+    def __init__(self, parent, title=""):
+        wx.Frame.__init__(self, parent, title=title, size=(1000,600))
+        self.CreateStatusBar()
+        # 1st Generate menus: File, Edit
+#        self.createMenuBar()
+        # Here we create a panel and a notebook on the panel
+        p = wx.Panel(self, wx.ID_ANY)
+        nb = wx.Notebook(p)
+        
+        # Here we create a panel and a notebook on the panel
+        self.page1 = PickByEnergy(nb)
+        self.page2 = DnldHQDataPanel(nb)
+        self.page3 = PageThree(nb)
+
+        
+        
+        # add the pages to the notebook with the label to show on the tab
+        nb.AddPage(self.page1, "量能筛选")
+        nb.AddPage(self.page2, "数据更新")
+        nb.AddPage(self.page3, "RPS")
+        # finally, put the notebook in a sizer for the panel to manage
+        # the layout
+        self.SetBackgroundColour("white")
+        sizer = wx.BoxSizer()
+        sizer.Add(nb, 1, wx.ALL|wx.EXPAND)
+        
+        p.SetSizer(sizer)
+        p.Fit()
+        p.Show()
+        self.Show()
+#        self.SetDoubleBuffered(True)
+        
+        
+    def menuData(self):
+        return (("&File",(
+                      ("&Open","Open a file from directory",self.OnOpen),
+                      ("","",""),
+                      ("&About","about this editor",self.OnAbout),
+                      ("","",""),
+                      ("E&xit", "Exit the programer",self.OnExit))),
+                      ("&Edit",(
+                      ("&Font","Change the font", self.OnEditFont),
+                      ("","",""),
+                      ("Dr&aw", "Draw your picture",self.OnEditDraw))))
+    def createMenuBar(self):
+        menuBar = wx.MenuBar()          ##???
+        for eachMenuData in self.menuData():
+            menuLabel = eachMenuData[0]
+            menuItems = eachMenuData[1]
+            menuBar.Append(self.createMenu(menuItems), menuLabel)
+        self.SetMenuBar(menuBar)
+    def createMenu(self,menuItems):
+        menu = wx.Menu()
+        for eachLable, eachStatus, eachhandler in menuItems:
+            if not eachLable:   #for "", add a spacer
+                menu.AppendSeparator()
+                continue
+            menuItem = menu.Append(-1, eachLable, eachStatus)
+            self.Bind(wx.EVT_MENU, eachhandler, menuItem)
+        return menu
+        # About 
+    def OnAbout(self, event):
+        # A message dialog box with an OK button. wx.OK is a standard ID in wxWidgets. 
+        #dlg = wx.MessageDialog( self, "A small text editor", "About Sample Editor", wx.OK)
+        dlg = wx.MessageDialog( self, "A small text editor", "About Sample Editor")    #wx.ID can be omited in this case. wxWidget will assign one automaticlly.
+        dlg.ShowModal()         # Show it
+        dlg.Destroy()             # finally destroy it when finished.
+    # Open
+    def OnOpen(self, event):
+        """ Open a file"""
+        self.dirname = ''
+        dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "*.*", wx.FD_OPEN)    #wx.FD_OPENf for py3.5; wx.OPEN for py2.7
+        # 调用了ShowModal。通过它，打开了对话框。“Modal（模式/模态）”意味着在用户点击了确定按钮或者取消按钮之前，他不能在该程序中做任何事情。ShowModal的返回值是被按下的按钮的ID。如果用户点击了确定按钮，我们就读文件
+        if dlg.ShowModal() == wx.ID_OK:
+            self.filename = dlg.GetFilename()
+            self.dirname = dlg.GetDirectory()
+            f = open(os.path.join(self.dirname, self.filename), 'r')
+            self.control.SetValue(f.read())
+            f.close()
+        dlg.Destroy()
+    # Exit
+    def OnExit(self, e):
+        self.Close(True)            # Close the frame
+    def OnEditFont(self, event):
+        pass
+    def OnEditDraw(self, event):
         pass
         
-
 class Controller(object):
+    def __init__(self, title=''):
+        # 1. model
+        self.dnldModel = dataworker.DnldHQDataModel()
+        # 2. parent view 
+        self.view = Viewer(None, title)
+        # 3. child view
+        self.rpsController = Controller_RPS(self.view.page3.splitterpanel1)
+        self.dnldDataController = Controller_dnldData(self.view.page2, self.dnldModel)
+        # 4. show view
+        self.view.Show()
+                
+class Controller_RPS(object):
+    def __init__(self, view):
+        self.view = view
+        logger.debug("hello, %s",__class__)
+
+class Viewer_Base(object):
     def __init__(self):
-        self.model = Model()
         pass
+    def setStartDate(self, date):
+        self.textCtrlFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.setLoggerMsg(date)
+    
+    def setEndDate(self, date):
+        #self.textCtrlFields["end date"].SetValue(date)
+        self.textCtrlFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.setLoggerMsg(date)
+
+    def setWorkDays(self, days):
+        self.textCtrlFields["work days"].SetValue(days)
+        self.setLoggerMsg(days)
+
+    def setAuType(self, autype):
+        self.auTyperbx.SetSelection(self.auTyperbx.FindString(autype))
+        self.setLoggerMsg(autype)
+        
+class Controller_dnldData(object):
+    def __init__(self, view, model):
+        logger.debug("hello, %s",__class__)
+        self.model=model
+        self.view = view
+        self.view.setStartDate(self.model.start_date)
+        self.view.setEndDate(self.model.end_date)
+        self.view.setWorkDays(self.model.days_num)
+        self.view.setAuType(self.model.autypeStr)
+        
+        
+        # msg from view to controller
+        pub.subscribe(self.pubMsg_DnldHQdataPanel, "pubMsg_DnldHQdataPanel")
+        # msg from model to controller
+        pub.subscribe(self.pubMsg_DnldHQDataModel, "pubMsg_DnldHQDataModel")
+
+        # msg from view to controller
+        pub.subscribe(self.pubMsg_DnldHQdataPanel, "pubMsg_DnldHQdataPanel")
+        # msg from model to controller
+        pub.subscribe(self.pubMsg_DnldHQDataModel, "pubMsg_DnldHQDataModel")
+
+    def pubMsg_DnldHQDataModel(self, msg):
+        if isinstance(msg, str):
+            if msg == "endHQupdate":
+                self.view.setPanelOn()     
+                self.view.setLoggerMsg("End data udpate\n")           
+        elif isinstance(msg, int):
+            self.view.setGaugeCount(msg)
+
+    def pubMsg_DnldHQdataPanel(self, msg):
+        logger.debug("pubMsg_DnldHQdataPanel: msg = %s", msg)
+        if (isinstance(msg, tuple)):
+            #tuple(name, para) style
+            if (msg[0]=="start date"):
+                self.model.start_date = msg[1]
+                logger.debug("start date changed, = %s", self.model.start_date)
+            if (msg[0]=="end date"):
+                self.model.end_date = msg[1]
+                logger.debug("end date changed, = %s", self.model.end_date)
+            if (msg[0]=="work days"):
+                self.worker_work_days(msg[1])
+            if (msg[0]=="update button"):
+                self.worker_updateButton(msg[1])
+            if (msg[0] =="auType cbx"):
+                if (msg[1] in self.view.auTypeStrList):
+                    #check box from viewer
+                    self.model.set_DBname_and_autype(msg[1])
+    
+    def worker_updateButton(self, para):
+        if (para == "updating data"):
+            self.view.setPanelOff()
+            self.view.setUpdateButtonLabel('Stop')
+            self.model.HQonoff=1
+            self.view.setLoggerMsg('Start data update')
+            logger.debug("pubMsg_DnldHQdataPanel: start data update")
+            #update button pressed, to start, from viewer
+            t = threading.Thread(target=self.model.updateHQdata, args=())
+            t.start()
+        elif (para =='stop updating'):
+            self.model.HQonoff=0
+            self.view.setUpdateButtonOff()
+            self.view.setLoggerMsg('Stop data update')
+            logger.debug("pubMsg_DnldHQdataPanel: stop data update")
+            #update button pressed, to stop, from viewer
+    def worker_work_days(self, days):
+        try:
+            days_num = int(days)
+        except Exception as e:
+            logger.warn(e)
+        start_date=self.get_startdate_byworkday(self.model.end_date, days_num)
+        self.model.start_date = start_date
+        self.view.setStartDate(start_date)
+        logger.debug("work days changed, = %d", days)
+        logger.debug("start date changed, = %s", self.model.start_date)
+            
+    def get_startdate_byworkday(self,end_date_str, numofdays):
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+        if end_date.isoweekday() in [6,7]:
+            preDate = end_date-timedelta(end_date.isoweekday()-5)
+        else:
+            preDate = end_date
+        while (numofdays>1):
+            if (preDate.isoweekday() not in [6,7]):
+                numofdays-=1
+                preDate = preDate-timedelta(days=1)
+            else:
+                preDate = preDate-timedelta(days=1)
+        while(preDate.isoweekday() in [6,7]):
+            preDate = preDate-timedelta(days=1)
+        return preDate.strftime("%Y-%m-%d")
 
 
-class Model(object):
-    def __init__(self):
-        
-        pass
-        
-class DnldStockData(wx.Panel):
+class DnldHQDataPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
-#        self.panel= wx.Panel(self, wx.ID_ANY)
-        self.start_date='2018-10-20'
-        self.end_date=datetime.now().strftime("%Y-%m-%d")       #'2018-10-18'
+        #self.start_date='2018-10-20'
+        #self.end_date=datetime.now().strftime("%Y-%m-%d")       #'2018-10-18'
         
-        self.autypeStr = 'nfq'         #不复权
-        self.days_num = 30
+        #self.autypeStr = 'nfq'         #不复权
+        #self.days_num = ''
                 
-#        self.control = wx.TextCtrl(self, size=(200,100),style=wx.TE_MULTILINE)
         self.SetBackgroundColour("grey")
         startY=0
         startX=0
@@ -1270,24 +1066,16 @@ class DnldStockData(wx.Panel):
 #        self.textCtrlHooks=[]
         self.textCtrlFields={}
         self.idx_START_DATE, self.idx_END_DATE, self.idx_WORK_DAY = range(3)
-        self.createDateTextBar(self, grid, yPos=0)
-
-        startY-=1
-              
-        startY+=1
-
-
-        startY+=1
-
         
-        startY+=1
-        
+        self.createDatePickerBar(self, grid, yPos=0)
+        self.createDateTextBar(self, grid, yPos=2)
+        startY+=3
         # Button: Update Data
-        self.HQonoff=1          #used to stop self.hq.updateHQdata
-        self.updateBtnStatus = 'Update Data'        #or 'Stop'
-        self.updateHQbuttons = wx.Button(self, -1, "Update Data")        # add buttons
+#        self.HQonoff=1          #used to stop self.hq.updateHQdata
+        self.updateBtnCurrLabel = 'Update Data'        #or 'Stop'
+        self.updateHQbuttons = wx.Button(self, -1, "Update Data", name="Update Button")        # add buttons
         grid.Add(self.updateHQbuttons, pos=(startY+1,startX))
-        self.Bind(wx.EVT_BUTTON, self.Evt_UpdateButton, self.updateHQbuttons)      
+        self.Bind(wx.EVT_BUTTON, self.Evt_UpdateButtonPressed, self.updateHQbuttons) 
         
         # Gauge
         self.gaugecount=0
@@ -1301,12 +1089,14 @@ class DnldStockData(wx.Panel):
         startY+=1
         
         #Radio boxes: auType, qfq, hfq, bfq
-        self.auTypeList= ['nfq', 'qfq', 'hfq']
-        self.auTyperbx = wx.RadioBox(self, label="Data Type", pos=(startY+1, startX+ 1), choices=self.auTypeList,  majorDimension=3,
-                         style=wx.RA_SPECIFY_ROWS)
+        self.auTypeStrList= ['nfq', 'qfq', 'hfq']
+        self.autypedict={'nfq':None, 'qfq':'qfq', 'hfq':'hfq'}
+
+        self.auTyperbx = wx.RadioBox(self, label="Data Type", pos=(startY+1, startX+ 1), choices=self.auTypeStrList,  majorDimension=3,
+                         style=wx.RA_SPECIFY_ROWS, name="auType cbx")
         grid.Add(self.auTyperbx, pos=(startY+1,startX), span=(1,2))
         self.Bind(wx.EVT_RADIOBOX, self.EvtTypeRadioBox, self.auTyperbx)
-    #        self.sizer2 = wx.BoxSizer(wx.HORIZONTAL)    #ob2
+#        self.sizer2 = wx.BoxSizer(wx.HORIZONTAL)    #ob2
 #        self.buttons = []
 #        for i in range(0, 3):
 #            self.buttons.append(wx.Button(self,-1, "Button &"+str(i)))        # add buttons
@@ -1316,46 +1106,102 @@ class DnldStockData(wx.Panel):
         hSizer.Add(grid, 0, wx.ALL, 5)
         hSizer.Add(self.logger, 0, wx.ALL, 5)
         mainSizer.Add(hSizer, proportion=0,flag=wx.EXPAND|wx.ALL, border=5)
-#        mainSizer.Add(self.control, proportion=0,flag=wx.ALL|wx.ALIGN_CENTER_VERTICAL|wx.ALIGN_LEFT,border = 5)
-#        mainSizer.Add(self.sizer2, 0, wx.CENTER)
-        #mainSizer.Add(self.sizer, 0, wx.ALL, 5)
-
-#        mainSizer.Add(self.button, 0, wx.CENTER)
         self.SetSizer(mainSizer)
         self.Fit()
         self.gauge.Hide()
-#        self.hq = hqdata.HqDataHandler(self)
-        self.hq = HqDataHandler(self)
-#        self.model = SimpleDBName()
-        pub.subscribe(self.updateDisplay, "update")
+
+        #pub.subscribe(self.updateDisplay, "update")
         self.SetDoubleBuffered(True)        
 #        self.Refresh()
-###### Model ######
-    def updateStartDate(self, model):
-        self.textCtrlFields["start date:"].SetValue(model.start_date)
-
 
 ###### Viewer ######
+    def setStartDate(self, date):
+        self.textCtrlFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.setLoggerMsg(date)
+    
+    def setEndDate(self, date):
+        #self.textCtrlFields["end date"].SetValue(date)
+        self.textCtrlFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.setLoggerMsg(date)
+
+    def setWorkDays(self, days):
+        self.textCtrlFields["work days"].SetValue(days)
+        self.setLoggerMsg(days)
+
+    def setAuType(self, autype):
+        self.auTyperbx.SetSelection(self.auTyperbx.FindString(autype))
+        self.setLoggerMsg(autype)
+
+    def setGaugeCount(self, counter):
+        self.gaugecount = counter
+        self.gauge.SetValue(self.gaugecount)
+
+
+    def setPanelOn(self):
+        for label in self.textCtrlFields:
+            self.textCtrlFields[label].Enable()
+        self.updateHQbuttons.Enable()
+        self.auTyperbx.Enable()
+        self.gauge.Hide()
+        self.gaugecount = 0
+        self.gauge.SetValue(self.gaugecount)
+        self.updateBtnCurrLabel = 'Update Data'
+        self.updateHQbuttons.SetLabel(self.updateBtnCurrLabel)
+    
+    def setPanelOff(self):
+        for label in self.textCtrlFields:
+            self.textCtrlFields[label].Disable()
+        #self.updateHQbuttons.Disable()
+        self.auTyperbx.Disable()
+        self.gauge.Hide()
+        self.gaugecount = 0
+        self.gauge.SetValue(self.gaugecount)
+     
+    def setUpdateButtonOff(self):
+        self.updateHQbuttons.Disable()
+
+    def setUpdateButtonLabel(self, name):
+        self.updateHQbuttons.SetLabel(name)
+
+    def setLoggerMsg(self, msg):
+        self.logger.AppendText(msg+'\n')
+
     def dateTextData(self):
         #label, size, value, handler
-        return (("start date", (80, -1), self.start_date, self.Evt_StartDate),
-                     ("end date", (80, -1), self.end_date, self.Evt_EndDate),
-                     ("work days", (40, -1), '', self.Evt_DaysNum))
+        return (("work days", (40, -1), '', self.Evt_DaysNum),)
     def createDateTextBar(self, panel, grid, yPos=0):
         for dateTextItem in self.dateTextData():
+        #for dateTextItem in self.datePickerData():
             self.buildOneDateText(panel,grid, yPos, dateTextItem)
             yPos+=1
     def buildOneDateText(self, panel, grid, yPos, dateTextItem):
         for label, size, value, handler in [dateTextItem]:
             text = wx.StaticText(panel, label=label)
             grid.Add(text, pos=(yPos, 0))
-            textctrl = wx.TextCtrl(panel, value=value, size=size)
+            textctrl = wx.TextCtrl(panel, value=value, size=size, name=label, style=wx.TE_PROCESS_ENTER)
+            self.Bind(wx.EVT_TEXT_ENTER, handler, textctrl)
             self.textCtrlFields[label]=textctrl
 #            self.textCtrlHooks.append(textctrl)
             grid.Add(textctrl, (yPos, 1))
-            self.Bind(wx.EVT_TEXT, handler, textctrl)
             
-
+    def datePickerData(self):
+        #label, size, value, handler
+        return (("start date", (80, -1), '', self.Evt_StartDate),
+                     ("end date", (80, -1), '', self.Evt_StartDate))
+    def buildOneDatePicker(self,panel, grid, yPos, dateTextItem):
+        for label, size, value, handler in [dateTextItem]:
+            text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
+            grid.Add(text, pos=(yPos, 0))
+            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN | wx.adv.DP_SHOWCENTURY, name=label)
+            self.textCtrlFields[label]=datepicker
+#            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DEFAULT)
+            self.Bind(wx.adv.EVT_DATE_CHANGED, handler, datepicker)
+            grid.Add(datepicker, (yPos, 1))          
+    def createDatePickerBar(self, panel, grid, yPos=0):
+        #for dateTextItem in self.dateTextData():
+        for dateTextItem in self.datePickerData():
+            self.buildOneDatePicker(panel,grid, yPos, dateTextItem)
+            yPos+=1
     def buttonData(self):
         return(("Update Data", self.Evt_UpdateButton))   
     def createButtonBar(self, panel, grid, yPos = 0):
@@ -1369,47 +1215,39 @@ class DnldStockData(wx.Panel):
         button = wx.button(parent, -1, label, pos)
         self.Bind(wx.EVT_BUTTON, handler, button)
         return button
-    
-###### Controller ###### 
-  
+
+    # changer widget    
+    def Evt_UpdateButtonPressed(self,event):
+        name = "update button" 
+        if (self.updateBtnCurrLabel == "Update Data"):
+            para = "updating data"
+            self.updateBtnCurrLabel = 'Stop'
+        elif (self.updateBtnCurrLabel == 'Stop'):
+            para = "stop updating"
+            self.updateBtnCurrLabel = "Update Data"
+        pub.sendMessage("pubMsg_DnldHQdataPanel", msg=(name, para))
+
     def Evt_UpdateButton(self, event):
-        if (self.updateBtnStatus == 'Update Data'):
+        if (self.updateBtnCurrLabel == 'update data'):
             self.HQonoff=1
-            self.updateBtnStatus = 'Stop'
-            self.updateHQbuttons.SetLabel(self.updateBtnStatus)
-#            for textCtrlHook in self.textCtrlHooks:
-#                textCtrlHook.Disable()
+            self.updateBtnCurrLabel = 'Stop'
+            self.updateHQbuttons.SetLabel(self.updateBtnCurrLabel)
             for label in self.textCtrlFields:
                 self.textCtrlFields[label].Disable()
-#            self.editstartdate.Disable()
-#            self.editenddate.Disable()
-#            self.updateHQbuttons.Disable()
             self.auTyperbx.Disable()        #not work, why?
-    
             self.gaugecount = 0
             self.gauge.SetValue(self.gaugecount)
             self.gauge.Show()
             self.logger.AppendText('Evt_UpdateButton\n')
             self.logger.AppendText('hq update start\n')
-            t = threading.Thread(target=self.hq.updateHQdata, args=())
-            t.start()
-#            t = threading.Thread(target=wx.CallAfter, args=(self.hq.updateHQdata,))
-#            wx.CallAfter(self.hq.updateHQdata)
-        elif (self.updateBtnStatus == 'Stop'):
-            self.HQonoff=0
-            print('clear self.HQonoff to 0, to stop hqupdate')
-            self.updateBtnStatus = 'Update Data'
-            #self.updateHQbuttons.SetLabel(self.updateBtnStatus)
+        elif (self.updateBtnCurrLabel == 'Stop'):
+            
+            logger.debug('clear self.HQonoff to 0, to stop hqupdate')
+            self.updateBtnCurrLabel = 'Update Data'
             self.updateHQbuttons.Disable()
-            #print("updateBtnStatus is %s"%self.updateBtnStatus)
-#        t.join()                
-        #self.hq.updateHQdata()
-#        self.auTyperbx.Enable()
-#        self.logger.AppendText('hq update end\n')
-#        self.editstartdate.Enable()
-#        self.editenddate.Enable()
-#        self.updateHQbuttons.Enable()
-            pass
+        pub.sendMessage("pubMsg_DnldHQdataPanel", msg=self.updateBtnCurrLabel)
+
+    
     def get_startdate_byworkday(self,end_date_str, numofdays):
         end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
         if end_date.isoweekday() in [6,7]:
@@ -1426,30 +1264,30 @@ class DnldStockData(wx.Panel):
             preDate = preDate-timedelta(days=1)
         return preDate.strftime("%Y-%m-%d")
     
-    def updateDisplay(self, msg):
+#    def updateDisplay(self, msg):
         
-        if isinstance(msg, str):
-            if msg == "endHQupdate":
-                #self.logger.AppendText("enable menu,msg=%s\n"%msg)
-#                for textCtrlHook in self.textCtrlHooks:
-#                    textCtrlHook.Enable()
-                for label in self.textCtrlFields:
-                    self.textCtrlFields[label].Enable()
+#        if isinstance(msg, str):
+#            if msg == "endHQupdate":
+#                #self.logger.AppendText("enable menu,msg=%s\n"%msg)
+##                for textCtrlHook in self.textCtrlHooks:
+##                    textCtrlHook.Enable()
+#                for label in self.textCtrlFields:
+#                    self.textCtrlFields[label].Enable()
                 
-                self.updateHQbuttons.Enable()
-                self.auTyperbx.Enable()
+#                self.updateHQbuttons.Enable()
+#                self.auTyperbx.Enable()
 
-                self.gauge.Hide()
-                self.gaugecount = 0
-                self.gauge.SetValue(self.gaugecount)
+#                self.gauge.Hide()
+#                self.gaugecount = 0
+#                self.gauge.SetValue(self.gaugecount)
                 
-                self.updateBtnStatus = 'Update Data'
-                self.updateHQbuttons.SetLabel(self.updateBtnStatus)
+#                self.updateBtnCurrLabel = 'Update Data'
+#                self.updateHQbuttons.SetLabel(self.updateBtnCurrLabel)
 
-        elif isinstance(msg, int):
-            #self.logger.AppendText('gauge %d\n'%msg)
-            self.gaugecount = msg
-            self.gauge.SetValue(self.gaugecount)
+#        elif isinstance(msg, int):
+#            #self.logger.AppendText('gauge %d\n'%msg)
+#            self.gaugecount = msg
+#            self.gauge.SetValue(self.gaugecount)
             
             
 #        self.displayLbl.SetLabel("Time since thread started: %s seconds" % t)
@@ -1457,8 +1295,10 @@ class DnldStockData(wx.Panel):
         self.logger.AppendText('EvtRadioBox: %d\n' % event.GetInt())
         
     def EvtTypeRadioBox(self, event):
-        self.autypeStr = event.GetString()
-        self.hq.update_DB_and_autype()
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_DnldHQdataPanel", msg=(name, para))
+        #self.hq.set_DBname_and_autype()
         self.logger.AppendText('EvtTypeRadioBox: %s\n' % event.GetString())
 
 #        print(event.GetKeyCode())
@@ -1467,25 +1307,26 @@ class DnldStockData(wx.Panel):
     def OnClick(self,event):
         self.logger.AppendText(" Click on object with Id %d\n" %event.GetId())
     def Evt_StartDate(self, event):
-        self.start_date = event.GetString()
-        self.logger.AppendText('Evt_StartDate: %s\n' % event.GetString())
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue().Format('%Y-%m-%d')
+        pub.sendMessage("pubMsg_DnldHQdataPanel", msg=(name, para))
+        #self.start_date = event.GetString()
+        #self.logger.AppendText('Evt_StartDate: %s\n' % event.GetString())
+        #print(1, event.GetString())
+        #print(2, event.GetEventObject().GetValue().Format('%Y-%m-%d'))
+        
+        #print(3, event.GetEventObject().GetName())
+        #print(4, event.GetValue())
+        #print(5, event.GetValue().strftime("%Y-%m-%d"))
     def Evt_DaysNum(self, event):
-        if (event.GetString()==''):
-            # to avoid infinite loop
-            pass
-        else:
-            try:
-                self.logger.AppendText('Evt_DaysNum: %s\n' % event.GetString())
-                self.days_num = int(event.GetString())
-#                self.start_date = (datetime.now()-timedelta(days=self.days_num)).strftime("%Y-%m-%d")
-                self.start_date=self.get_startdate_byworkday(self.end_date, self.days_num)
-#                self.textCtrlHooks[self.idx_START_DATE].SetValue(self.start_date)
-                self.textCtrlFields["start date"].SetValue(self.start_date)
-            except Exception as e:
-                print(e)
-#                self.textCtrlHooks[self.idx_WORK_DAY].SetValue('')
-                self.textCtrlFields["work days"].SetValue('')
-        self.logger.AppendText('Evt_DaysNum: %s\n' % event.GetString())
+        try:
+            name = event.GetEventObject().GetName()
+            para = int(event.GetString())
+            pub.sendMessage("pubMsg_DnldHQdataPanel", msg=(name, para))
+        except Exception as e:
+            logger.warn(e)
+            logger.warn("Input work days is not a valid int Number")
+
     def Evt_EndDate(self, event):
         self.end_date = event.GetString()
         self.logger.AppendText('Evt_EndDate: %s\n' % event.GetString())
@@ -1512,11 +1353,12 @@ class UI(object):
 
     def ui_init(self, title="Stock Quant V0.01"):
         self.app = wx.App(False)  # Create a new app, don't redirect stdout/stderr to a window.
-        self.frame = MyFrame(None, title=title)  # A Frame is a top-level window. , size=(200,-1)
-#        self.panel = DnldStockData(self.frame)
+        self.c = Controller(title)
+        #self.frame = MyFrame(None, title=title)  # A Frame is a top-level window. , size=(200,-1)
+#        self.panel = DnldHQDataPanel(self.frame)
             
         
-        self.frame.Show()
+        #self.frame.Show()
         #self.app.SetTopWindow(self.frame)
         #self.frame.Center()
         #return self.frame, self.panel
