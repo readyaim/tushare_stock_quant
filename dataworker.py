@@ -7,6 +7,7 @@ add threading.event to 'stop' button
 
 import sys
 import os
+import gc
 import wx
 from wx.lib.pubsub import pub
 from datetime import datetime, timedelta
@@ -19,7 +20,7 @@ import logging
 #from twisted.internet import reactor
 import time
 from time import ctime
-
+import sqlite3
 
 import pandas as pd
 from pandas import Series, DataFrame
@@ -30,6 +31,7 @@ from matplotlib.pylab import date2num
 import matplotlib.pyplot as plt
 import matplotlib  
 
+import psutil
 
    
 # matplotlib采用WXAgg为后台,将matplotlib嵌入wxPython中  
@@ -81,11 +83,15 @@ from wx.lib.splitter import MultiSplitterWindow
 G_NUM_OF_CODES = 3      #3625
 from viewer import logger
 class Sqlite3Handler(object):
-    def __init__(self, autype='qfq'):
-        self.autypeStr = autype
+    def __init__(self, autypeStr='qfq'):
+        self.sql_filename_base = 'hqData.db'
+        self.sql_filename = self.sql_filename_base
+        self.autypeStr = autypeStr
         self.set_DBname_and_autype(self.autypeStr)
         self.hq_codes = self.get_codes()
         self.tablenm_hqall='hqall_t'
+        self.date_tail = '00:00:00.000000'
+        
 
     def set_DBname_and_autype(self, autypeStr):
         if (autypeStr == 'nfq'):
@@ -101,7 +107,12 @@ class Sqlite3Handler(object):
         self.engine = create_engine('sqlite+pysqlite:///%s'%self.sql_filename, module=sqlite)
         self.initDB()
         logger.debug("change to %s database and engine",self.sql_filename)
+#        self.engine.dispose()
     
+    def updateEngine(self):
+        self.engine = create_engine('sqlite+pysqlite:///%s'%self.sql_filename, module=sqlite)
+        logger.debug("create engine to %s database",self.sql_filename)
+        
     def get_codes(self,table_nm=None):
         codes = []
         if (table_nm==None):
@@ -148,22 +159,230 @@ class Sqlite3Handler(object):
     
 class CalcRPS_Model(Sqlite3Handler):
     def __init__(self):
-        self.start_date = datetime.now().strftime("%Y-%m-%d")
+
+#        self.start_date = datetime.now().strftime("%Y-%m-%d")
+        self.start_date = '2018-10-22'
+        self.end_date = datetime.now().strftime("%Y-%m-%d")
         self.rpsNChoices=['120', '240']
         self.rpsMktChoices = [u'全部', u'深市', u'沪市', u'创业板' ]
         self.rpsRangeChoices = [u'全部', u'一年以上']
-        self.rpsN = 240
+        self.rpsN = '20'
         self.rpsMktIdx = 0
         self.rpsRangeIdx = 0
+        self.onoff=1
         #self.autype='qfq'
-        super(DnldHQDataModel, self).__init__('qfq')
+        super(CalcRPS_Model, self).__init__("nfq")
+
+    def createColumnIfnotExist(self):
+        self.rpsN='20'  #for debug only
+        colnames = []
+        rpsColnm="rps%s"%self.rpsN
+        pctColnm = "pct%s"%self.rpsN
+        #colnames.append([rpsColnm, 'Integer'])
+        colnames.append([pctColnm,'float'])
+        for col, col_type in colnames:
+            cmd="ALTER TABLE %s ADD %s %s"%(self.tablenm_hqall, col, col_type)
+            logger.debug("%s", cmd)
+            try:
+                self.engine.execute(cmd)
+                logger.debug("creat new column: %s %s", col , col_type)
+            except Exception as e:
+                logger.debug("%s (%s) already exists", col , col_type)
+                print(e)
+    def saveSelectedCodesToFavorite(self, selectedCodes):
+        filename = "favorite.csv"
+        mytime = datetime.now().strftime("%Y-%m-%d")
+        with open (filename, 'a+') as fw:
+            fw.write(mytime+':')
+            for i in selectedCodes:
+                fw.write(i+',')
+            fw.write('\n')
+    def getRPSbyCode(self, code):
+        print("run getRPSbyCode: %s"%code)
+        pct_nm = 'pct%s'%self.rpsN
+        rps_nm = 'rps%s'%self.rpsN
+        rpsN = int(self.rpsN)
+#        self.start_date='2018-10-22'
+#        self.targe_date = self.start_date+' '+self.date_tail
+        cmd="SELECT * FROM %s WHERE code = '%s'"%(self.tablenm_hqall, code)
+        try:
+            df=pd.read_sql_query(cmd, self.engine)
+        except Exception as e:
+            logger.error("read rps data by code from %s error", self.tablenm_hqall)
+            logger.error(e)
+            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+            return
+        if (len(df)==0):
+            logger.debug('Error, database read rps error, len = %d', len(df))
+            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_getRPSbyDate")
+        else:    
+            df_sorted = df.sort_values(by='date', ascending=True)
+            logger.debug('read rps data by code from base to dataframe success! len = %d', len(df))    
+        pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_getRPSbyCode", df_sorted[['date',rps_nm,'code']]))
+#        pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_getRPSbyCode", df))
+        #pub.sendMessage("pubMsg_RPSRightUpPanel", msg=df_pct)
+        pass
+#    def sortExistedRPSdata(self, df, colname, direction=True):
+    def sortExistedRPSdata(self, para):
+        df=para[0]
+        colname = para[1]
+        direction = para[2]
+        df = df.sort_values(by=colname, ascending=direction)
+        pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_getRPSbyDate", df))
+    def getRPSbyDate(self):
+        pct_nm = 'pct%s'%self.rpsN
+        rps_nm = 'rps%s'%self.rpsN
+        rpsN = int(self.rpsN)
+        lowerPCT = 95
+#        self.start_date='2018-10-22'
+        self.targe_date = self.start_date+' '+self.date_tail
+        cmd="SELECT * FROM %s WHERE date = '%s'"%(self.tablenm_hqall, self.targe_date)
+        try:
+            df=pd.read_sql_query(cmd, self.engine)
+        except Exception as e:
+            logger.error("read rps data from %s error", self.tablenm_hqall)
+            logger.error(e)
+            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+            return
+        if (len(df)==0):
+            logger.debug('Error, database read rps error, len = %d', len(df))
+            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+        else:    
+            logger.debug('read rps data from base to dataframe success! len = %d', len(df))    
+            df_pct = df[df[rps_nm]>lowerPCT]
+            #print(df_pct)
+        pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_getRPSbyDate", df_pct))
+        #pub.sendMessage("pubMsg_RPSRightUpPanel", msg=df_pct)
+        pass
+    
+    
+    def caculateOneCodeRPS(self, code="603999"):
+        logger.debug("run caculateOneCodeRPS()")
+        #self.createColumnIfnotExist()
+        para_getData = (self.tablenm_hqall, code)
+        cmd="SELECT * FROM %s WHERE code='%s'"%para_getData
+        print(cmd)
+#        df=pd.read_sql_query(cmd, self.engine, params=para_getData)
+        df=pd.read_sql_query(cmd, self.engine)
+        #print(df)
+        diff_nm = 'diff%s'%self.rpsN
+        pct_nm = 'pct%s'%self.rpsN
+        rps_nm = 'rps%s'%self.rpsN
+        #print(diff_nm, pct_nm, rps_nm)
+        df[diff_nm]=df['close'].diff(-int(self.rpsN))
+        df[pct_nm]=(df[diff_nm]/(df['close']+df[diff_nm])).round(4)
+        df[rps_nm]=df[pct_nm].rank(method="first")
+        # rate, code, date
+        c = df.apply(lambda x:(x[pct_nm],x['code'],x['date']), axis=1)
+        #c = df.apply(lambda x:(x[pct_nm],x[rps_nm],x['code'],x['date']), axis=1)
         
+        para=tuple(c)
+        #print(para)
+        cmd = "UPDATE hqall_t SET %s = ? WHERE code = ? AND date = ?"%(pct_nm)
+        #cmd = "UPDATE hqall_t SET %s = ? %s = ?WHERE code = ? AND date = ?"%(pct_nm, rps_nm)
+        a = self.engine.execute(cmd, para)
+        logger.debug("end of %s",__class__)
+          
+    def calcAllRPS_old(self):
+        i=0
+        preStopMarker=200
+        memInfo = psutil.virtual_memory()
+        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
+        start = time.time()
+        self.createColumnIfnotExist()
+        for code in self.hq_codes:
+            
+            if (self.onoff==1):
+                if (i>=preStopMarker):
+                    try:
+                        self.caculateOneCodeRPS(code)
+                    except Exception as e:
+                        logger.debug(e)
+            else:
+                break
+            i+=1
+            if (i>=preStopMarker):
+                #gc.collect()
+                logger.info("memory usage: %s", format(psutil.Process(os.getpid()).memory_info().rss,','))
+                logger.info("total: %s, usage: %f%%, cpu: %d", format(memInfo.total,','), memInfo.percent, psutil.cpu_count())
+                logger.debug("i=%d",i)
+#            if (i>=10):
+#                break
+        logger.debug("time: %.2fs, i = %d",(time.time()-start), i)
+        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
+        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
+                             format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
+        pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+        
+    def calcAllRPS(self):
+        '''Read out all data from sql database, transfer, and generate 'pctN' and 'rpsN' two columns.
+        Then write back to database
+        '''
+        #self.rpsN = '20'        #TODO: this is only for debug, should be removed in formal useage
+        logger.debug("calculation RPS start!")
+        logger.debug("N =%s", self.rpsN)
+        logger.debug("database =%s", self.sql_filename)
+#        self.updateEngine()
+#        conn = sqlite3.connect(self.sql_filename)
+#        c = conn.cursor()
+#        self.engine=conn
+        memInfo = psutil.virtual_memory()
+        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
+        start = time.time()
+        #self.createColumnIfnotExist()
+        pct_nm = 'pct%s'%self.rpsN
+        rps_nm = 'rps%s'%self.rpsN
+        rpsN = int(self.rpsN)
+        cmd="SELECT * FROM %s"%self.tablenm_hqall
+        logger.debug("sql cmd: %s", cmd)
+        try:
+            df=pd.read_sql_query(cmd, self.engine)
+        except Exception as e:
+            logger.debug('line 260')
+            logger.error("read data from %s error", self.tablenm_hqall)
+            logger.error(e)
+            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+            return
+        #df[pct_nm] = df.groupby('code')['close'].pct_change(20)   #not working, a bug for groupy pct_change. use below apply
+        if (len(df)==0):
+            logger.debug('Error, database read error, len = %d', len(df))
+            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+        else:    
+            logger.debug('read data from base to dataframe success! len = %d', len(df))
+            try:
+                df.groupby('code').apply(lambda x: x.sort_values(by='date', ascending=False))
+                df[pct_nm]= (df.groupby('code')['close'].apply(lambda x: x.pct_change(-rpsN))).round(4)
+                df[rps_nm] = (df.groupby('date')[pct_nm].apply(lambda x: x.rank(pct=True))*100).round(1)
+                logger.debug('caculation is done! Start saving...')
+            except Exception as e:
+                logger.error("dataframe caculation is wrong!")
+                logger.error(e)
+                pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+                return
+#            print(df)
+            try:
+#                cmd = "DROP TABLE %s"%self.tablenm_hqall
+#                self.engine.execute(cmd)
+#                logger.debug("drop previous table success!")
+                pd.io.sql.to_sql(df, self.tablenm_hqall, self.engine, if_exists='replace',index=False, chunksize= 10000)
+            except Exception as e:
+                logger.error(e)
+                
+            logger.debug("Caculation for %s is finished!! Time used: %.2fs",rps_nm,(time.time()-start))
+            #gc.collect()
+            endMemUsage = psutil.Process(os.getpid()).memory_info().rss
+            logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
+                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
+            
+            #close engine
+           # self.engine.dispose()   
+#            conn.commit()
+#            conn.close()
+            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
 
 class DnldHQDataModel(Sqlite3Handler):
     def __init__(self):
-        self.sql_filename_base = 'hqData.db'
-        self.sql_filename = self.sql_filename_base
-        self.date_tail = '00:00:00.000000'
+        
         self.start_date='2018-10-15'
         self.end_date = datetime.now().strftime("%Y-%m-%d")
         self.current_date = datetime.now().strftime("%Y-%m-%d")
@@ -172,6 +391,7 @@ class DnldHQDataModel(Sqlite3Handler):
 #        self.engine = create_engine('sqlite+pysqlite:///%s'%self.sql_filename, module=sqlite)
         #self.engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite)
 #        self.engine = create_engine('sqlite+pysqlite:///file.db', module=sqlite)
+        name = __class__
         super(DnldHQDataModel, self).__init__('qfq')
 #        
 #        self.autypeStr = 'qfq'
@@ -287,7 +507,7 @@ class DnldHQDataModel(Sqlite3Handler):
                 logger.info("updateHQdata() is finished, i=%d",i)
                 break
  #       pub.sendMessage("update", msg="endHQupdate")            
-        pub.sendMessage("pubMsg_DnldHQDataModel", msg="endHQupdate")            
+        pub.sendMessage("pubMsg_DnldHQDataModel", msg="endHQupdate")
             
     def read_from_DB(self):
         tablenm = self.tablenm_hqall
@@ -577,7 +797,94 @@ N=20
 c=b[20][1]
 
 #search the No mth data, m=20
- cmd="SELECT date, close FROM hqall_t WHERE code='603999' limit 20,1"
+cmd="SELECT date, close FROM hqall_t WHERE code='603999' limit 20,1"
 a=engine.execute(cmd)
 b=a.fetchall()
+
+#use cmd like this:
+my_code=('603999',)
+cmd = "SELECT * FROM hqall_t WHERE code = ?"
+a=engine.execute(cmd,my_code)
+df=pd.read_sql_query(cmd, engine, params=my_code)
+
+df['diff20']=df['close'].diff(-20)
+df['rate']=df['diff20']/(df['close']+df['diff20'])
+df['rps20']=df['rate'].rank(method="first")
+ c = df.apply(lambda x:(x[10],x[7],x[0]), axis=1)
+ d=tuple(c)
+cmd="ALTER TABLE hqall_t ADD rps20 Integer" 
+a = engine.execute(cmd)
+cmd = "UPDATE hqall_t SET rps20 = ? WHERE code = ? AND date = ?"
+
+a = engine.execute(cmd, d)
+value, code, date
+
+#pandas read_sql
+cmd="SELECT date, close FROM hqall_t WHERE code='603999'"
+df=pd.read_sql_query(cmd, engine)
+
+
+engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite)
+cmd="SELECT * FROM hqall_t WHERE code='603999'"
+df=pd.read_sql_query(cmd, engine)
+df['diff20']=df['close'].diff(-20)
+df['rate']=df['diff20']/(df['close']+df['diff20'])
+df['rps20']=df['rate'].rank(method="first")
+ c = df.apply(lambda x:(x[10],x[7],x[0]), axis=1)
+ d=tuple(c)
+
+diff_nm='diff20'
+rpsN='20'
+pct_nm='rate20'
+rps_nm='rps20'
+df[diff_nm]=df['close'].diff(-int(rpsN))
+df[pct_nm]=df[diff_nm]/(df['close']+df[diff_nm])
+df[rps_nm]=df[pct_nm].rank(method="first")
+c = df.apply(lambda x:(x[pct_nm],x['code'],x['date']), axis=1)
+
+
+
+#查询字段名称是否存在
+cmd="SELECT COUNT('pct20') from hqall_t"
+
+cmd = "if not exist SELECT pct240 from hqall_t limit 0,1 ALTER TABLE hqall_t ADD pct240 float"
+
+ cmd = "select *  from sqlite_master"
+  cmd = "select sql  from sqlite_master"^M
+ b=engine.execute(cmd).fetchall()
+ for i in b[2]:
+     if isinstance(i, str):
+         if ('pct20' in i):
+             print(True)
+https://www.cnblogs.com/hbtmwangjin/p/7941403.html
+
+通过reset_index()函数可以将groupby()的分组结果转换成DataFrame对象，这样就可保存了！！
+
+#load all data
+engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite)
+cmd="SELECT * FROM hqall_t"
+df=pd.read_sql_query(cmd, engine)
+dfg = df.groupby([df['code'],df['date']])
+df['pct20']=df['close'].groupby([df['code'], df['date']]).pct_change(20)
+
+
+df[['code','date','close']]
+df.set_index(['code', 'date'])
+dfg = ddf.groupby([ddf['code'],ddf['date']])
+
+
+engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite)
+#cmd="SELECT * FROM hqall_t where code='600999' or code ='000703' "
+cmd="SELECT * FROM hqall_t"
+df=pd.read_sql_query(cmd, engine)
+#dff = df.groupby('code')['close'].apply(lambda x: x.pct_change(20))
+df['pct20']= df.groupby('code')['close'].apply(lambda x: x.pct_change(20))
+df['rps20'] = df.groupby('date')['pct20'].apply(lambda x: x.rank(pct=True))*100
+df.to_sql('hqall_t', engine, if_exists='replace',index=True)
+
+#排序 
+df.sort_values(by='code')
+#转换 date'
+df['date_parsed'] = pd.to_datetime(df['date'], format = "%Y-%m-%d", errors = 'coerce')
+data['date_parsed'] = pd.to_datetime(data['Date'],infer_datetime_format=True)
 '''

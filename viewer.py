@@ -33,13 +33,6 @@ from matplotlib.pylab import date2num
 import matplotlib.pyplot as plt
 import matplotlib  
    
-# matplotlib采用WXAgg为后台,将matplotlib嵌入wxPython中  
-#matplotlib.use("WXAgg")  
-#from matplotlib.backends.backend_wxagg 
-#import FigureCanvasWxAgg as FigureCanvas  
-#from matplotlib.figure import Figure  
-#from matplotlib.backends.backend_wx 
-#import NavigationToolbar2Wx as NavigationToolbar  
 
 #from twisted.internet import protocol, reactor, task
 #from twisted.internet import defer
@@ -66,6 +59,25 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import Column, String, Integer, Text
 from sqlalchemy import MetaData, Sequence
 from sqlalchemy.orm import sessionmaker, relationship
+
+
+import matplotlib  
+import numpy as np   
+# matplotlib采用WXAgg为后台,将matplotlib嵌入wxPython中  
+#matplotlib.use("WXAgg")  
+from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas  
+from matplotlib.figure import Figure  
+from matplotlib.backends.backend_wx import NavigationToolbar2Wx as NavigationToolbar  
+
+
+
+import wx
+import wx.lib.agw.aui as aui
+import wx.lib.mixins.inspection as wit
+
+import matplotlib as mpl
+from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
+from matplotlib.backends.backend_wxagg import NavigationToolbar2WxAgg as NavigationToolbar
 
 
 
@@ -111,6 +123,7 @@ from wx.lib.splitter import MultiSplitterWindow
 #class TestTable(wx.grid.PyGridTableBase):#定义网格表
 class TestTable(wx.grid.GridTableBase):#定义网格表
     def __init__(self, data={}):
+        self.defaultLabel="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         wx.grid.GridTableBase.__init__(self)
 #        self.data = { (1,1) : "Here",
 #                            (2,2) : "is",
@@ -127,11 +140,17 @@ class TestTable(wx.grid.GridTableBase):#定义网格表
 
     # these five are the required methods
     def GetNumberRows(self):
-        return self.data.shape[0]
-
+        if (isinstance(self.data, pd.core.frame.DataFrame)):
+            print("GetNumberRows called, return %d"%self.data.shape[0])
+            return self.data.shape[0]
+        elif (isinstance(self.data, dict)):
+            return 50
     def GetNumberCols(self):
-        return self.data.shape[1]
-        
+        if (isinstance(self.data, pd.core.frame.DataFrame)):
+            print("GetNumberCols called, return %d"%self.data.shape[1])
+            return self.data.shape[1]
+        elif (isinstance(self.data, dict)):
+            return 50
     def IsEmptyCell(self, row, col):
         if (isinstance(self.data, dict)):
             return self.data.get((row, col)) is not None
@@ -152,17 +171,27 @@ class TestTable(wx.grid.GridTableBase):#定义网格表
             return ''
     def SetValue(self, row, col, value):#给表赋值
         pass
+    def GetColLabelValue(self, col):#列标签
+        if (isinstance(self.data, pd.core.frame.DataFrame)):
+            return self.data.columns[col]
+        elif (isinstance(self.data, dict)):
+            return str(col)
+#    def GetRowLabelValue(self, row):#行标签
+#        return self.rowLabels[row]
+        
         # Now allow to write table
 #        if (isinstance(self.data, dict)):
 #            self.data[(row,col)] = value
 #        elif (isinstance(self.data, pd.core.frame.DataFrame)):
 #            self.data.iloc[row,col] = value
     # the table can also provide the attribute for each cell
-    def GetAttr(self, row, col, kind):
-        attr = [self.even, self.odd][row % 2]
-        attr.IncRef()
-        return attr
-
+    
+#    def GetAttr(self, row, col, kind):
+#        attr = [self.even, self.odd][row % 2]
+#        attr.IncRef()
+#        return attr
+    def setData(self, data):
+        self.data = data
 
 
 class PageOne(wx.Panel):
@@ -174,9 +203,10 @@ class PageOne(wx.Panel):
 class RPSLeftPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
-        self.rpsNChoices=['120', '240']
+        self.rpsNChoices=['5','20','50','120', '240']
         self.rpsMktChoices = [u'全部', u'深市', u'沪市', u'创业板' ]
         self.rpsRangeChoices = [u'全部', u'一年以上']
+        self.rpsTextLabelFields={}
 #        t = wx.StaticText(self, -1, "This is a Page RPS Left object", (20,20), style=wx.ST_NO_AUTORESIZE)
         mainsizer = wx.BoxSizer(wx.VERTICAL)
         #RPS条件设置
@@ -185,43 +215,118 @@ class RPSLeftPanel(wx.Panel):
         mainsizer.AddSpacer(10)
         
         #启动按钮
-        button = wx.Button(self, -1, label=u"开始")
-        self.Bind(wx.EVT_BUTTON, self.Evt_Startup, button)
-        mainsizer.Add(button)
+#        name="rpsTglBtn"
+#        self.toggleButton = wx.ToggleButton(self, -1, label=u"开始", name= name)
+#        self.rpsTextLabelFields[name]=self.toggleButton
+#        self.Bind(wx.EVT_TOGGLEBUTTON, self.Evt_toggleButton, self.toggleButton)
+#        mainsizer.Add(self.toggleButton)
+
+        #Radio boxes: auType, qfq, hfq, bfq
+        self.auTypeStrList= ['nfq', 'qfq', 'hfq']
+        self.autypedict={'nfq':None, 'qfq':'qfq', 'hfq':'hfq'}
+        sizer = self.buildRPS_InitDataBar()
+        mainsizer.Add(sizer, 0, wx.EXPAND)
+
+        #启动按钮
+#        name = 'rpsBtn'
+#        self.startRPSbuttons = wx.Button(self, -1, "Start", name=name)        # add buttons
+#        self.rpsTextLabelFields[name]=self.startRPSbuttons
+#        self.Bind(wx.EVT_BUTTON, self.Evt_RPSstartButton, self.startRPSbuttons) 
         
+
         self.SetBackgroundColour("white")
-#        self.SetSizer(mainsizer)
         self.SetSizer(mainsizer)
-##        mainsizer.Fit(self)
-#        self.Fit()
         self.Show()
         self.SetDoubleBuffered(True)    #to avoid flickering of text
+## Viewer ##
+    def buildRPS_InitDataBar(self):
+#        box = wx.StaticBox(self, -1, u"RPS初始化")
+#        staticsizer = wx.StaticBoxSizer(box, wx.HORIZONTAL)
+        staticsizer = wx.BoxSizer(wx.HORIZONTAL)
+        cbxname = "auType cbx"
+        self.auTyperbx = wx.RadioBox(self, label="Data Type", pos=(-1, -1), choices=self.auTypeStrList,  majorDimension=1,
+                         style=wx.RA_SPECIFY_ROWS, name=cbxname)
+        self.rpsTextLabelFields[cbxname]=self.auTyperbx
+        self.Bind(wx.EVT_RADIOBOX, self.EvtRPSauTypeRadioBox, self.auTyperbx)
+        staticsizer.Add(self.auTyperbx)
+        
+        vsizer = wx.BoxSizer(wx.VERTICAL)
+        name = 'rpsInitCbx'
+        cbx = wx.CheckBox(self, label=u'允许初始化', name=name)
+        self.rpsTextLabelFields[name]=cbx
+        self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, cbx)
+        vsizer.Add(cbx, 0, wx.ALL, 2)
+        
+        vsizer.AddSpacer(4)
+        
+        name = 'rpsInitBtn'
+        self.startRPSbuttons = wx.Button(self, -1, "RPS Init", name=name)        # add buttons
+        self.rpsTextLabelFields[name]=self.startRPSbuttons
+        self.Bind(wx.EVT_BUTTON, self.Evt_RPSDataInitButton, self.startRPSbuttons) 
+        self.startRPSbuttons.Disable()
+        vsizer.Add(self.startRPSbuttons)
+        
+        staticsizer.AddSpacer(10)
+        staticsizer.Add(vsizer)
+        
+        
+        return staticsizer
+        
+    def setStartDate(self, date):
+        self.rpsTextLabelFields["start_date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+    
+    def setEndDate(self, date):
+        self.rpsTextLabelFields["end_date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+
+    def setRPSN(self, days):
+        self.rpsTextLabelFields["cmbxN"].SetValue(days)
+        logger.debug("set N=%s",days)        
+
+    def setStartButtonLabel(self, name):
+        self.toggleButton.SetLabel(name)
+
+    def setStartButtonOFF(self):
+        self.rpsTextLabelFields["rpsTglBtn"].Disable()
+
+    def setRPSPanelOff(self):
+        for label in self.rpsTextLabelFields:
+            self.rpsTextLabelFields[label].Disable()
+        #self.rpsTextLabelFields["rpsTglBtn"].Enable()
+    def setRPSPanelOn(self):
+        for label in self.rpsTextLabelFields:
+            self.rpsTextLabelFields[label].Enable()
+        self.startRPSbuttons.Disable()
+    def setAuType(self, autype):
+        self.auTyperbx.SetSelection(self.auTyperbx.FindString(autype))
+        logger.debug("set auType to '%s'"%autype)
         
     def buildRPSDateData(self):
-        return ((u"开始日期", "2018-10-25",self.EvtRPSDatePick),
-                    (u"截止日期", "2018-10-31",self.EvtRPSDatePick))
+        return ((u"开始日期", "2018-10-25",self.EvtRPSDatePick,"start_date"),
+                    (u"截止日期", "2018-10-31",self.EvtRPSDatePick,"end_date"))
     def buildRPSDateBar(self):
         hSizer = wx.BoxSizer(wx.HORIZONTAL)
         for chooseRPSDateItem in self.buildRPSDateData():
             self.buildOneRPSDate(hSizer, chooseRPSDateItem)
         return hSizer
     def buildOneRPSDate(self, sizer, dataItem):
-        for label, value, eHandler in [dataItem]:
+        for label, value, eHandler, name in [dataItem]:
             text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
             sizer.Add(text, 0, wx.ALL, 2)
-            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN | wx.adv.DP_SHOWCENTURY)
+            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN | wx.adv.DP_SHOWCENTURY, name=name)
+            self.rpsTextLabelFields[name]=datepicker
 #            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DEFAULT)
             self.Bind(wx.adv.EVT_DATE_CHANGED, eHandler, datepicker)
             sizer.Add(datepicker, 0, wx.ALL, 2)
     def buildRPSOptionData(self):
-        return (('N:', 0, self.rpsNChoices, self.EvtRPSn),
-                    (u'市场', 0, self.rpsMktChoices, self.EvtMktSetting),
-                    (u'范围', 0, self.rpsRangeChoices, self.EvtRangeSetting))
+        return (('N:', 0, self.rpsNChoices, self.EvtRPSn, "cmbxN"),
+                    (u'市场', 0, self.rpsMktChoices, self.EvtMktSetting, "market"),
+                    (u'范围', 0, self.rpsRangeChoices, self.EvtRangeSetting, "range"))
     def buildOneRPSOption(self, sizer, dataItem):
-        for label, cmbxIdx, choices, eHandler in [dataItem]:
+        for label, cmbxIdx, choices, eHandler, name in [dataItem]:
             text = wx.StaticText(self, label=label)
             sizer.Add(text, 0, wx.ALL, 2)
-            cmbx = wx.ComboBox(self, size=(60, -1), choices=choices, value=choices[cmbxIdx],style=wx.CB_DROPDOWN|wx.CB_READONLY)
+            cmbx = wx.ComboBox(self, size=(60, -1), choices=choices, value=choices[cmbxIdx],style=wx.CB_DROPDOWN|wx.CB_READONLY, name=name)
+            self.rpsTextLabelFields[name] = cmbx
             self.Bind(wx.EVT_COMBOBOX, eHandler, cmbx)
             sizer.Add(cmbx, 0, wx.ALL, 2)
     def buildRPSOptionBar(self):
@@ -230,22 +335,35 @@ class RPSLeftPanel(wx.Panel):
             self.buildOneRPSOption(hSizer, chooseRPSOptionItem)
         return hSizer
 
+    
+    def buildRPStartButton(self, sizer):
+        name = 'rpsStartBtn'
+        self.startRPSStartBtn = wx.Button(self, -1, "Start", name=name)        # add buttons
+        self.rpsTextLabelFields[name]=self.startRPSStartBtn
+        self.Bind(wx.EVT_BUTTON, self.Evt_RPStartBtn, self.startRPSStartBtn) 
+        sizer.Add(self.startRPSStartBtn, 0, wx.ALIGN_CENTER,2)
+        
     def buildRPSRangeData(self):
-        return ((u'RPS 从', 100, self.rpsRangeFrom),
-                    (u'至', 80, self.rpsRangeTo))
+        return ((u'RPS 从', 100, self.rpsRangeFrom, "scRPS_start"),
+                    (u'至', 80, self.rpsRangeTo, "scRPS_end"))
     def buildOneRPSRange(self, sizer, dataItem):
-        for label, initvalue, eHandler in [dataItem]:
+#        hsizer = wx.BoxSizer(wx.HORIZONTAL)
+        for label, initvalue, eHandler,name in [dataItem]:
             text = wx.StaticText(self, label=label)
             sizer.Add(text, 0, wx.ALL, 2)
-            sc = wx.SpinCtrl(self, size=(60,-1))
+            sc = wx.SpinCtrl(self, size=(60,-1), name=name)
             sc.SetRange(1,100)
             sc.SetValue(initvalue)
+            self.rpsTextLabelFields[name] = sc
             self.Bind(wx.EVT_TEXT, eHandler, sc)
             sizer.Add(sc, 0, wx.ALL, 2)
+        
+        
     def buildRPSRangeBar(self):
         hSizer = wx.BoxSizer(wx.HORIZONTAL)
         for chooseRPSRangeItem in self.buildRPSRangeData():
             self.buildOneRPSRange(hSizer, chooseRPSRangeItem)
+        self.buildRPStartButton(hSizer)
         return hSizer
 
             
@@ -263,12 +381,31 @@ class RPSLeftPanel(wx.Panel):
         #row3
         sizer = self.buildRPSRangeBar()
         staticsizer.Add(sizer, 0, wx.ALL, 2)
+        staticsizer.SetSizeHints(self)
         return staticsizer
      
-    def EvtRPSDatePick(self,e):
+    def EvtCheckBox(self, event):
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue()
+        if (para == True):
+            self.startRPSbuttons.Enable()
+        else:
+            self.startRPSbuttons.Disable()
+
+    def EvtRPSDatePick(self,event):
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue().Format('%Y-%m-%d')
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+    
+    def EvtRPSn(self,event):
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+        #print(e.GetEventObject().GetStringSelection())
+        #print(e.GetString())
         pass
-    def EvtRPSn(self,e):
-        pass
+    
+        
     def EvtRangeSetting(self,e):
         pass
     def EvtMktSetting(self,e):
@@ -277,20 +414,58 @@ class RPSLeftPanel(wx.Panel):
         pass
     def rpsRangeTo(self,e):
         pass    
-    def Evt_Startup(self,e):
-        pass
-class RPSRightPanel(wx.Panel):
+    
+    def Evt_RPStartBtn(self, event):
+        name = 'rpsStartButton'
+        para = event.GetEventObject().GetName()
+        #para = event.GetEventObject().GetValue()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+    
+    def EvtRPSauTypeRadioBox(self, event):
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+        #logger.debug('EvtRPSauTypeRadioBox event')
+        
+    def Evt_RPSDataInitButton(self, event):
+        name = 'rpsDataInitButton'
+        para = event.GetEventObject().GetName()
+        #para = event.GetEventObject().GetValue()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+        
+    def Evt_toggleButton(self,event):
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+
+class RPSRightUpPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
 #        t = wx.StaticText(self, -1, "This is a Page RPS Right object", (20,20), style=wx.ST_NO_AUTORESIZE)       
-        grid = wx.grid.Grid(self)
-        self.data = self.getStockData()
-        table = TestTable(self.data)
-        self.myTable = grid.SetTable(table, True)
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(grid, 1, wx.EXPAND)
-        self.SetSizer(sizer)
+        self.grid = wx.grid.Grid(self)
+#        self.data = self.getStockData()
+        self.data={}
+        self.table = TestTable(self.data)
+        self.myTable = self.grid.SetTable(self.table, True, selmode=wx.grid.Grid.SelectRows)
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.grid.EnableEditing(False)
+        self.Bind(wx.grid.EVT_GRID_CELL_LEFT_CLICK, self.Evt_GridLeftClick, self.grid)
+        self.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, self.Evt_GridRightClick, self.grid)
+        self.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self.Evt_GridLeftDClick, self.grid)
+        self.Bind(wx.grid.EVT_GRID_LABEL_LEFT_DCLICK, self.Evt_GridLabelLeftDClick, self.grid)
+        # Key event
+        self.Bind(wx.EVT_KEY_DOWN, self.Evt_GridKeyDown)
+        
+        self.sizer.Add(self.grid, 1, wx.ALL|wx.EXPAND)
+        self.SetSizer(self.sizer)
+#        self.sizer.Fit(self)
+        self.labelDClickDict={}
+        self.directionList=[True, False]
         self.Fit()
+        
+        #Variable
+        self.selectedRowsList=[]
+
     def getStockData(self):
         try:
             df=pd.read_csv('stock_2.csv')
@@ -298,7 +473,98 @@ class RPSRightPanel(wx.Panel):
             print(e)
             df={}
         return df
+    def updateTable(self, data):
+        self.grid.ClearGrid()
+        self.data=data
+#        self.table.setData(self.data)
+#        self.myTable.data=self.data
+#        self.table.GetNumberRows()
+#        self.table.GetNumberCols()
+        
+        
+        self.table = TestTable(data)
+        self.myTable = self.grid.SetTable(self.table, True, selmode=wx.grid.Grid.SelectRows)
 
+#        self.sizer.FitInside(self)
+#        self.SetSizer(self.sizer)
+        # Autosize the column and row
+        self.grid.AutoSize()
+        self.grid.Refresh()
+        self.grid.ForceRefresh()
+#        self.sizer.Fit(self)
+#        self.SetSizer(self.sizer)
+
+    def Evt_GridLabelLeftDClick(self,event):
+        self.labelDClickDict[event.Col] = (self.labelDClickDict.get(event.Col, 0)+1)%2
+#        print(event.Col)
+        if (event.Col>=0):
+            name = "RPSGridColLabelLeftDClick"
+            para = (self.data, self.data.columns[event.Col], self.directionList[self.labelDClickDict[event.Col]])
+#            print(para)
+            pub.sendMessage("pubMsg_RPSRightUpPanel", msg=(name, para))
+#            self.SetSizer(self.sizer)
+#        print(dir(event))
+#        print(dir(event.GetEventObject()))
+    def Evt_GridKeyDown(self, event):
+        if (event.GetKeyCode()==wx.WXK_INSERT):
+            print(event)
+            self.selectedRowsList = []
+        
+    def Evt_GridRightClick(self,event):
+        """Dont know why : list(self.data['code'][event.GetEventObject().SelectedRows].values) is not working"""
+        """Use a stupid way """
+        i=0
+        codeIdx = 0
+        for col in self.data.columns:
+            if col =='code':
+                codeIdx=i
+            i+=1
+        para = []
+        for idx in event.GetEventObject().SelectedRows:
+            para.append(self.data.iloc[idx, codeIdx])
+        name = "rpsRightUp_rightClick"
+        pub.sendMessage("pubMsg_RPSRightUpPanel", msg=(name, para))
+        
+    def Evt_GridLeftClick(self,event):
+        #self.selectedRowsList = event.GetEventObject().GetSelectedRows().append(event.Row)
+        pass
+#        print("Evt_GridLeftClick---------")
+#        print(event.Row)
+#        print(event.GetEventObject().SelectedRows
+#        self.selectedRowsList = []
+#        for i in range(grid.GetNumberRows()):dRows())
+#        grid = event.GetEventObject()
+#            if (grid.IsInSelection( i, 0 )):
+#                self.selectedRowsList.append(i)
+#                
+#        print(self.selectedRowsList)
+        
+        
+        event.Skip()
+    def Evt_GridLeftDClick(self, event):
+        i=0
+        dateIdx = 0
+        codeIdx = 0
+        for col in self.data.columns:
+            if col =='code':
+                codeIdx=i
+            elif col =='date':
+                dateIdx=i
+            i+=1
+        name = "RPSGridTableLeftDClick"
+        para = self.data.iloc[event.Row, codeIdx]
+        pub.sendMessage("pubMsg_RPSRightUpPanel", msg=(name, para))
+#        self.SetSizer(self.sizer)
+#        print(dir(event))
+#        print(event.GetRow())
+#        print(type(event.Row))
+#        print(event.GetEventObject())
+#        event.GetEventObject().SelectRow(event.Row)
+#        print(self.data['code'][event.Row])
+#        print(self.data['date'][event.Row])
+#        print(self.data.iloc[event.Row, codeIdx])
+#        print(self.data.iloc[event.Row, dateIdx])
+        
 class PageThree(wx.Panel):
 #    def __init__(self, parent):
 #        wx.Panel.__init__(self, parent)
@@ -307,6 +573,7 @@ class PageThree(wx.Panel):
         wx.Panel.__init__(self, parent)
         mainsplitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         self.splitterpanel1 = RPSLeftPanel(mainsplitter)
+#        self.splitterpanel2 = RPSRightUpPanel(mainsplitter)
         self.splitterpanel2 = RPSRightPanel(mainsplitter)
         mainsplitter.SetOrientation(wx.HORIZONTAL)
         mainsplitter.AppendWindow(self.splitterpanel1, -1)
@@ -603,9 +870,10 @@ class RightUpPanel(wx.Panel):
         wx.Panel.__init__(self, parent)
 #        t = wx.StaticText(self, -1, "This is a RightPanel object", (20,20))                
         grid = wx.grid.Grid(self)
-        self.data = self.getStockData()
-        table = TestTable(self.data)
-        self.myTable = grid.SetTable(table, True)
+#        self.data = self.getStockData()
+        self.data = {}
+        self.table = TestTable(self.data)
+        self.myTable = grid.SetTable(self.table, True)
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(grid, 1, wx.EXPAND)
         self.SetSizer(sizer)
@@ -623,6 +891,186 @@ import mpl_finance as mpf
 from matplotlib.pylab import date2num
 import datetime
 '''
+class MyPlot(wx.Panel):
+    def __init__(self, parent, id=-1, dpi=None, **kwargs):
+        wx.Panel.__init__(self, parent, id=id, **kwargs)
+        self.figure = mpl.figure.Figure(dpi=dpi, figsize=(2, 2))
+        self.canvas = FigureCanvas(self, -1, self.figure)
+        self.toolbar = NavigationToolbar(self.canvas)
+        self.toolbar.Realize()
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self.canvas, 1, wx.EXPAND)
+        #sizer.Add(self.toolbar, 0, wx.LEFT | wx.EXPAND)
+        self.SetSizer(sizer)
+
+
+class PlotNotebook(wx.Panel):
+    def __init__(self, parent, id=-1):
+        wx.Panel.__init__(self, parent, id=id)
+        self.nb = aui.AuiNotebook(self)
+        sizer = wx.BoxSizer()
+        sizer.Add(self.nb, 1, wx.EXPAND)
+        self.SetSizer(sizer)
+
+    def add(self, name="plot"):
+        page = MyPlot(self.nb)
+        self.nb.AddPage(page, name)
+        return page.figure
+
+class MPL_Panel(wx.Panel):  
+    ''''' #MPL_Panel面板,可以继承或者创建实例'''  
+    def __init__(self,parent):    
+        wx.Panel.__init__(self,parent=parent, id=-1)    
+     
+        self.Figure = matplotlib.figure.Figure(figsize=(4,3))    
+        self.axes = self.Figure.add_axes([0.1,0.1,0.8,0.8])    
+        self.FigureCanvas = FigureCanvas(self,-1,self.Figure)    
+             
+#        #继承鼠标移动显示鼠标处坐标的事件    
+#        self.FigureCanvas.mpl_connect('motion_notify_event',self.MPLOnMouseMove)    
+#             
+#        self.NavigationToolbar = NavigationToolbar(self.FigureCanvas)    
+#     
+#        self.StaticText = wx.StaticText(self,-1,label='Show Help String')    
+#     
+#        self.SubBoxSizer = wx.BoxSizer(wx.HORIZONTAL)    
+#        self.SubBoxSizer.Add(self.NavigationToolbar,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)    
+#        self.SubBoxSizer.Add(self.StaticText,proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)    
+#     
+        self.TopBoxSizer = wx.BoxSizer(wx.VERTICAL)    
+#        self.TopBoxSizer.Add(self.SubBoxSizer,proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)    
+        self.TopBoxSizer.Add(self.FigureCanvas,proportion =-10, border = 2,flag = wx.ALL | wx.EXPAND)    
+     
+        self.SetSizer(self.TopBoxSizer)    
+     
+    #显示坐标值        
+    def MPLOnMouseMove(self,event):    
+     
+        ex=event.xdata#这个数据类型是numpy.float64    
+        ey=event.ydata#这个数据类型是numpy.float64    
+        if ex  and ey :    
+            #可以将numpy.float64类型转化为float类型,否则格式字符串可能会出错    
+            self.StaticText.SetLabel('%10.5f,%10.5f' % (float(ex),float(ey)))    
+            #也可以这样    
+            #self.StaticText.SetLabel('%s,%s' % (ex,ey))       
+
+
+class RPSRightDownPanel_pre(wx.Panel):
+    """This class is a backup class for drawing NOTEBOOK like picture in wx.Panel.
+    not used in this project.
+    """
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        #t = wx.StaticText(self, -1, "This is a RPSRightDownPanel panel, used to draw RPS-Line of selected stock", (20,20))
+        #self.plotter = PlotNotebook(self)
+        self.plotter = aui.AuiNotebook(self)
+        sizer = wx.BoxSizer()
+        sizer.Add(self.plotter, 1, wx.EXPAND)
+        self.SetSizer(sizer)
+   
+    def displayOneRPSbyCode(self, df):
+        x = df.iloc[:,0]
+        y = df.iloc[:,1]
+        axes1 = self.plotter.add('figure 1').gca()
+        axes1.plot(x,y,'--b*')
+        
+    #    axes2 = plotter.add('figure 2').gca()
+    #    axes2.plot([1, 2, 3, 4, 5], [2, 1, 4, 2, 3])
+        self.Show()
+        
+        
+        
+        
+    #按钮事件,用于测试绘图  
+
+class RPSRightDownPanel(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+#        t = wx.StaticText(self, -1, "This is a RPSRightDownPanel panel, used to draw RPS-Line of selected stock", (20,20))
+        self.MPL = MPL_Panel(self)  
+        self.Figure = self.MPL.Figure  
+        self.axes = self.MPL.axes  
+        self.FigureCanvas = self.MPL.FigureCanvas  
+           
+#        self.RightPanel = wx.Panel(self,-1)  
+#        #测试按钮1  
+#        self.Button1 = wx.Button(self.RightPanel,-1,"TestButton",size=(100,40),pos=(10,10))  
+#        self.Button1.Bind(wx.EVT_BUTTON,self.Button1Event)  
+#        #创建FlexGridSizer  
+#        self.FlexGridSizer=wx.FlexGridSizer( rows=5, cols=1, vgap=5,hgap=5)  
+#        self.FlexGridSizer.SetFlexibleDirection(wx.BOTH)  
+#        #加入Sizer中  
+#        self.FlexGridSizer.Add(self.Button1,proportion =0, border = 5,flag = wx.ALL | wx.EXPAND)  
+#   
+#   
+#        self.RightPanel.SetSizer(self.FlexGridSizer)  
+#           
+        self.BoxSizer=wx.BoxSizer(wx.HORIZONTAL)  
+        self.BoxSizer.Add(self.MPL, proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)  
+#        self.BoxSizer.Add(self.RightPanel,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)  
+       
+        self.SetSizer(self.BoxSizer)
+        self.Fit()
+        #MPL_Frame界面居中显示  
+        self.Centre(wx.BOTH)  
+   
+    def displayOneRPSbyCode(self, df):
+        import matplotlib.dates as mdate
+        #把date string转换成datetime
+        x =  pd.to_datetime(df.iloc[:,0], format = "%Y-%m-%d", errors = 'coerce')
+#        x =  pd.to_datetime(df.iloc[:,0],infer_datetime_format=True)
+        y = df.iloc[:,1]
+        self.axes.cla()
+        self.axes.plot(x,y,'--b*')  
+        self.axes.set_title(df.loc[0,'code'])
+#        self.axes.plot(df,'--b*')  
+        self.axes.grid(True)
+        self.axes.xaxis.set_major_formatter(mdate.DateFormatter('%Y-%m-%d'))
+
+        #print(dir(self.FigureCanvas))
+        self.FigureCanvas.draw()#一定要实时更新  
+    #按钮事件,用于测试绘图  
+    def Button1Event(self,event):  
+        x=np.arange(-10,10,0.25)  
+        y=np.cos(x)  
+        self.axes.plot(x,y,'--b*')  
+        self.axes.grid(True)  
+        self.FigureCanvas.draw()#一定要实时更新  
+class RPSRightPanel(wx.Panel):
+    def __init__(self, parent):
+        wx.Panel.__init__(self, parent)
+        
+        self.mainsplitter = MultiSplitterWindow(self, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
+        self.splitterpanel1 = RPSRightUpPanel(self.mainsplitter)
+        self.splitterpanel2 = RPSRightDownPanel(self.mainsplitter)
+        self.mainsplitter.SetOrientation(wx.VERTICAL)
+        self.mainsplitter.AppendWindow(self.splitterpanel1, -1)
+        self.mainsplitter.AppendWindow(self.splitterpanel2, -1)
+        # workaround for scroller bar
+        # Scroller bar can not be displayed normally, except the window size is changed.
+        # So ,I change the SetSashPosition back and force every time after Table is updated.
+        
+        self.mainsplitter.SetSashPosition(0, 298)
+        self.mainsizer = wx.BoxSizer(wx.VERTICAL)
+        self.mainsizer.Add(self.mainsplitter, 1, wx.EXPAND | wx.ALL)
+#        mainSizer.Add(mainsplitter, 0, wx.ALL)
+        self.SetBackgroundColour("light grey")
+        self.SetSizer(self.mainsizer)
+        self.Fit()
+#        self.SetDoubleBuffered(True)
+        self.Show()
+        self.num=0
+        self.sashpositionValue = [299,300]
+    def updateSashPosition(self):
+        """ workaround for scroller bar:
+         A bug is in Scroller bar, it is not working normally after re-writing table in RPSRightUpPanel.
+         One way to workaround this bug is to change the window size by modifing the window size.
+         Through SetSashPosition() method. I toggle the sashpositionValue every time I update the table
+        """
+        self.num=(self.num+1)%2
+        self.mainsplitter.SetSashPosition(0, self.sashpositionValue[self.num])
+
 class RightDownPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
@@ -841,6 +1289,8 @@ class Viewer(wx.Frame):
         nb.AddPage(self.page1, "量能筛选")
         nb.AddPage(self.page2, "数据更新")
         nb.AddPage(self.page3, "RPS")
+        # Choose Page 2
+        nb.SetSelection(2)
         # finally, put the notebook in a sizer for the panel to manage
         # the layout
         self.SetBackgroundColour("white")
@@ -890,10 +1340,8 @@ class Viewer(wx.Frame):
         dlg.Destroy()             # finally destroy it when finished.
     # Open
     def OnOpen(self, event):
-        """ Open a file"""
         self.dirname = ''
-        dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "*.*", wx.FD_OPEN)    #wx.FD_OPENf for py3.5; wx.OPEN for py2.7
-        # 调用了ShowModal。通过它，打开了对话框。“Modal（模式/模态）”意味着在用户点击了确定按钮或者取消按钮之前，他不能在该程序中做任何事情。ShowModal的返回值是被按下的按钮的ID。如果用户点击了确定按钮，我们就读文件
+        dlg = wx.FileDialog(self, "Choose a file", self.dirname, " ", "*.*", wx.FD_OPEN)    #wx.FD_OPENf for py3.5; wx.OPEN for py2.7
         if dlg.ShowModal() == wx.ID_OK:
             self.filename = dlg.GetFilename()
             self.dirname = dlg.GetDirectory()
@@ -913,33 +1361,144 @@ class Controller(object):
     def __init__(self, title=''):
         # 1. model
         self.dnldModel = dataworker.DnldHQDataModel()
+        self.calcRPSModel = dataworker.CalcRPS_Model()
         # 2. parent view 
         self.view = Viewer(None, title)
         # 3. child view
-        self.rpsController = Controller_RPS(self.view.page3.splitterpanel1)
+        self.rpsController = Controller_RPS(self.view.page3.splitterpanel1, self.view.page3.splitterpanel2, self.calcRPSModel)
         self.dnldDataController = Controller_dnldData(self.view.page2, self.dnldModel)
         # 4. show view
         self.view.Show()
                 
-class Controller_RPS(object):
-    def __init__(self, view):
-        self.view = view
-        logger.debug("hello, %s",__class__)
 
+class Controller_RPS(object):
+    def __init__(self, view, viewRight, model):
+        logger.debug("hello, %s",__class__)
+        self.model = model
+        self.view = view
+        self.view.setStartDate(self.model.start_date)
+        self.view.setEndDate(self.model.end_date)
+        self.view.setRPSN(self.model.rpsN)
+        self.view.setAuType(self.model.autypeStr)
+        
+        self.viewRight = viewRight
+        
+        
+        # msg from view to controller
+        pub.subscribe(self.pubMsg_RPSLeftPanel, "pubMsg_RPSLeftPanel")
+        # msg from model to controller
+        pub.subscribe(self.pubMsg_CalcRPS_Model, "pubMsg_CalcRPS_Model")
+        
+        # msg from view to controller
+        pub.subscribe(self.pubMsg_RPSRightUpPanel, "pubMsg_RPSRightUpPanel")
+        
+    def pubMsg_RPSRightUpPanel(self, msg):
+        logger.debug("pubMsg_RPSRightUpPanel: msg = %s", msg)
+        if (isinstance(msg, tuple)):
+            #tuple(name, para) style
+            if (msg[0]=="RPSGridTableLeftDClick"):
+                #双击数据显示code对应 RPS值
+                self.model.getRPSbyCode(msg[1])
+            if (msg[0]=="RPSGridColLabelLeftDClick"):
+                #双击label排序
+                self.model.sortExistedRPSdata(msg[1])
+            if (msg[0]=="rpsRightUp_rightClick"):
+                self.model.saveSelectedCodesToFavorite(msg[1])
+
+    def pubMsg_RPSLeftPanel(self, msg):
+        logger.debug("pubMsg_RPSLeftPanel: msg = %s", msg)
+        if (isinstance(msg, tuple)):
+            #tuple(name, para) style
+            if (msg[0]=="start_date"):
+                self.model.start_date = msg[1]
+                logger.debug("RPS start date changed, = %s", self.model.start_date)
+            if (msg[0]=="end_date"):
+                self.model.end_date = msg[1]
+                logger.debug("RPS end date changed, = %s", self.model.end_date)
+            if (msg[0]=="cmbxN"):
+                self.model.rpsN=msg[1]
+                logger.debug("rpsN = %s", self.model.rpsN)
+            if (msg[0]=="rpsDataInitButton"):
+                self.worker_rpsDataInitButton(msg[1])
+            if (msg[0] =="auType cbx"):
+                if (msg[1] in self.view.auTypeStrList):
+                    #check box from viewer
+                    self.model.set_DBname_and_autype(msg[1])
+            if (msg[0]=="rpsStartButton"):
+                self.worker_rpsStartButton(msg[1])
+        pass
+    
+    def worker_rpsStartButton(self, para):
+        if (para == 'rpsStartBtn'):
+            self.view.setRPSPanelOff()
+            logger.debug("pubMsg_RPSLeftPanel: get RPS")
+            #update button pressed, to start, from viewer
+            t = threading.Thread(target=self.model.getRPSbyDate, args=())
+            t.start()
+    def worker_rpsDataInitButton(self, para):
+        if (para == 'rpsInitBtn'):
+            self.view.setRPSPanelOff()
+            logger.debug("pubMsg_RPSLeftPanel: start RPS Data Init")
+            #update button pressed, to start, from viewer
+            t = threading.Thread(target=self.model.calcAllRPS, args=())
+            t.start()
+
+    def worker_rpsStartTglButton(self, para):
+        if (para == True):
+            self.view.setRPSPanelOff()
+            self.view.setStartButtonLabel(u'停止')
+            self.model.onoff=1
+            logger.debug("pubMsg_RPSLeftPanel: start RPS update")
+            #update button pressed, to start, from viewer
+            t = threading.Thread(target=self.model.calcAllRPS, args=())
+            t.start()
+        elif (para ==False):
+            self.model.onoff=0
+            #self.view.setStartButtonLabel(u'开始')
+            self.view.setStartButtonOFF()
+            #self.view.setRPSPanelOn()   #TODO:only for test. REMOVE this in formal use. setRPSPanelOn() shoule be called when task is finished.
+            logger.debug("pubMsg_RPSLeftPanel: stop RPS update")
+            #update button pressed, to stop, from viewer
+
+    def pubMsg_CalcRPS_Model(self, msg):
+        logger.debug("pubMsg_CalcRPS_Model: msg = %s", msg)
+        if (isinstance(msg, tuple)):
+        #end_calcAllRPS
+            if (msg[0]=="end_getRPSbyDate"):
+                self.viewRight.splitterpanel1.updateTable(msg[1])
+                self.view.setRPSPanelOn()
+                #to refresh RPSRightDownPanel
+                #self.viewRight.splitterpanel2.Show()
+                self.viewRight.updateSashPosition()
+                
+
+            elif (msg[0]=="end_getRPSbyCode"):
+                self.viewRight.splitterpanel2.displayOneRPSbyCode(msg[1])
+                
+        elif isinstance(msg, str):
+            if msg == "end_calcAllRPS":
+                self.view.setRPSPanelOn()
+                #self.view.setStartButtonLabel(u'开始')   #for toggle button
+            if msg =="end_getRPSbyDate":
+                self.view.setRPSPanelOn()
+        elif isinstance(msg, int):
+            #self.view.setGaugeCount(msg)        
+            pass
+    
 class Viewer_Base(object):
     def __init__(self):
         pass
     def setStartDate(self, date):
-        self.textCtrlFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.textPanelFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
         self.setLoggerMsg(date)
     
     def setEndDate(self, date):
-        #self.textCtrlFields["end date"].SetValue(date)
-        self.textCtrlFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        #self.textPanelFields["end date"].SetValue(date)
+        self.textPanelFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
         self.setLoggerMsg(date)
 
     def setWorkDays(self, days):
-        self.textCtrlFields["work days"].SetValue(days)
+        self.textPanelFields["work days"].SetValue(days)
         self.setLoggerMsg(days)
 
     def setAuType(self, autype):
@@ -962,10 +1521,7 @@ class Controller_dnldData(object):
         # msg from model to controller
         pub.subscribe(self.pubMsg_DnldHQDataModel, "pubMsg_DnldHQDataModel")
 
-        # msg from view to controller
-        pub.subscribe(self.pubMsg_DnldHQdataPanel, "pubMsg_DnldHQdataPanel")
-        # msg from model to controller
-        pub.subscribe(self.pubMsg_DnldHQDataModel, "pubMsg_DnldHQDataModel")
+        
 
     def pubMsg_DnldHQDataModel(self, msg):
         if isinstance(msg, str):
@@ -988,28 +1544,46 @@ class Controller_dnldData(object):
             if (msg[0]=="work days"):
                 self.worker_work_days(msg[1])
             if (msg[0]=="update button"):
-                self.worker_updateButton(msg[1])
+                #self.worker_updateButton(msg[1])
+                self.worker_dnldStartButton(msg[1])
             if (msg[0] =="auType cbx"):
                 if (msg[1] in self.view.auTypeStrList):
                     #check box from viewer
                     self.model.set_DBname_and_autype(msg[1])
     
-    def worker_updateButton(self, para):
-        if (para == "updating data"):
+#    def worker_updateButton(self, para):
+#        if (para == "updating data"):
+#            self.view.setPanelOff()
+#            self.view.setUpdateButtonLabel('Stop')
+#            self.model.HQonoff=1
+#            self.view.setLoggerMsg('Start data update')
+#            logger.debug("pubMsg_DnldHQdataPanel: start data update")
+#            #update button pressed, to start, from viewer
+#            t = threading.Thread(target=self.model.updateHQdata, args=())
+#            t.start()
+#        elif (para =='stop updating'):
+#            self.model.HQonoff=0
+#            self.view.setUpdateButtonOff()
+#            self.view.setLoggerMsg('Stop data update')
+#            logger.debug("pubMsg_DnldHQdataPanel: stop data update")
+#            #update button pressed, to stop, from viewer
+  
+    def worker_dnldStartButton(self, para):
+        if (para == True):
             self.view.setPanelOff()
             self.view.setUpdateButtonLabel('Stop')
             self.model.HQonoff=1
-            self.view.setLoggerMsg('Start data update')
             logger.debug("pubMsg_DnldHQdataPanel: start data update")
             #update button pressed, to start, from viewer
             t = threading.Thread(target=self.model.updateHQdata, args=())
             t.start()
-        elif (para =='stop updating'):
+        elif (para ==False):
             self.model.HQonoff=0
             self.view.setUpdateButtonOff()
-            self.view.setLoggerMsg('Stop data update')
+            #self.view.setRPSPanelOn()   #TODO:only for test. REMOVE this in formal use. setRPSPanelOn() shoule be called when task is finished.
             logger.debug("pubMsg_DnldHQdataPanel: stop data update")
             #update button pressed, to stop, from viewer
+    
     def worker_work_days(self, days):
         try:
             days_num = int(days)
@@ -1047,7 +1621,7 @@ class DnldHQDataPanel(wx.Panel):
         #self.autypeStr = 'nfq'         #不复权
         #self.days_num = ''
                 
-        self.SetBackgroundColour("grey")
+        self.SetBackgroundColour("white")
         startY=0
         startX=0
         
@@ -1056,26 +1630,29 @@ class DnldHQDataPanel(wx.Panel):
         grid = wx.GridBagSizer(hgap=5, vgap=5)
         hSizer = wx.BoxSizer(wx.HORIZONTAL)     #wx.VERTICAL
 
-#        self.quote = wx.StaticText(self, label="STOCK QUANT V0.01 ")
-#        grid.Add(self.quote, pos=(startY,startX))
-
         # A multiline TextCtrl - This is here to show how the events work in this program, don't pay too much attention to it
         self.logger = wx.TextCtrl(self, size=(200,200), style=wx.TE_MULTILINE | wx.TE_READONLY)
         
         # 2nd Generate textCtrls        
-#        self.textCtrlHooks=[]
-        self.textCtrlFields={}
+        self.textPanelFields={}
         self.idx_START_DATE, self.idx_END_DATE, self.idx_WORK_DAY = range(3)
         
         self.createDatePickerBar(self, grid, yPos=0)
-        self.createDateTextBar(self, grid, yPos=2)
+        self.createWorkdaysTextBar(self, grid, yPos=2)
         startY+=3
-        # Button: Update Data
-#        self.HQonoff=1          #used to stop self.hq.updateHQdata
+        
+        # Toggle Button: Update Data
+        name = "update button"
         self.updateBtnCurrLabel = 'Update Data'        #or 'Stop'
-        self.updateHQbuttons = wx.Button(self, -1, "Update Data", name="Update Button")        # add buttons
+        self.updateHQbuttons = wx.ToggleButton(self, -1, label=u"Update Data", name= name)        # add buttons
         grid.Add(self.updateHQbuttons, pos=(startY+1,startX))
-        self.Bind(wx.EVT_BUTTON, self.Evt_UpdateButtonPressed, self.updateHQbuttons) 
+        self.Bind(wx.EVT_TOGGLEBUTTON, self.Evt_UpdateButtonPressed, self.updateHQbuttons) 
+        
+#        self.updateBtnCurrLabel = 'Update Data'        #or 'Stop'
+#        self.updateHQbuttons = wx.Button(self, -1, "Update Data", name="Update Button")        # add buttons
+#        grid.Add(self.updateHQbuttons, pos=(startY+1,startX))
+#        self.Bind(wx.EVT_BUTTON, self.Evt_UpdateButtonPressed, self.updateHQbuttons) 
+        
         
         # Gauge
         self.gaugecount=0
@@ -1083,8 +1660,7 @@ class DnldHQDataPanel(wx.Panel):
         grid.Add(self.gauge, pos=(startY+1, startX+1))
         self.Bind(wx.EVT_IDLE, self.GaugeOnIdle, self.gauge)
         self.gauge.SetValue(self.gaugecount)
-#        self.gauge.Disable()
-#        self.gauge.Hide()
+#        self.gauge.Hide()      #Hide the gauage after SetSizer(mainSizer), to avoid abnormal display
         
         startY+=1
         
@@ -1111,21 +1687,22 @@ class DnldHQDataPanel(wx.Panel):
         self.gauge.Hide()
 
         #pub.subscribe(self.updateDisplay, "update")
+        self.SetBackgroundColour("grey")
         self.SetDoubleBuffered(True)        
 #        self.Refresh()
 
 ###### Viewer ######
     def setStartDate(self, date):
-        self.textCtrlFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.textPanelFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
         self.setLoggerMsg(date)
     
     def setEndDate(self, date):
-        #self.textCtrlFields["end date"].SetValue(date)
-        self.textCtrlFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        #self.textPanelFields["end date"].SetValue(date)
+        self.textPanelFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
         self.setLoggerMsg(date)
 
     def setWorkDays(self, days):
-        self.textCtrlFields["work days"].SetValue(days)
+        self.textPanelFields["work days"].SetValue(days)
         self.setLoggerMsg(days)
 
     def setAuType(self, autype):
@@ -1138,8 +1715,8 @@ class DnldHQDataPanel(wx.Panel):
 
 
     def setPanelOn(self):
-        for label in self.textCtrlFields:
-            self.textCtrlFields[label].Enable()
+        for label in self.textPanelFields:
+            self.textPanelFields[label].Enable()
         self.updateHQbuttons.Enable()
         self.auTyperbx.Enable()
         self.gauge.Hide()
@@ -1149,11 +1726,11 @@ class DnldHQDataPanel(wx.Panel):
         self.updateHQbuttons.SetLabel(self.updateBtnCurrLabel)
     
     def setPanelOff(self):
-        for label in self.textCtrlFields:
-            self.textCtrlFields[label].Disable()
+        for label in self.textPanelFields:
+            self.textPanelFields[label].Disable()
         #self.updateHQbuttons.Disable()
         self.auTyperbx.Disable()
-        self.gauge.Hide()
+        self.gauge.Show()
         self.gaugecount = 0
         self.gauge.SetValue(self.gaugecount)
      
@@ -1166,21 +1743,21 @@ class DnldHQDataPanel(wx.Panel):
     def setLoggerMsg(self, msg):
         self.logger.AppendText(msg+'\n')
 
-    def dateTextData(self):
+    def workdaysTextData(self):
         #label, size, value, handler
         return (("work days", (40, -1), '', self.Evt_DaysNum),)
-    def createDateTextBar(self, panel, grid, yPos=0):
-        for dateTextItem in self.dateTextData():
+    def createWorkdaysTextBar(self, panel, grid, yPos=0):
+        for dateTextItem in self.workdaysTextData():
         #for dateTextItem in self.datePickerData():
-            self.buildOneDateText(panel,grid, yPos, dateTextItem)
+            self.buildOneWorkdaysText(panel,grid, yPos, dateTextItem)
             yPos+=1
-    def buildOneDateText(self, panel, grid, yPos, dateTextItem):
+    def buildOneWorkdaysText(self, panel, grid, yPos, dateTextItem):
         for label, size, value, handler in [dateTextItem]:
             text = wx.StaticText(panel, label=label)
             grid.Add(text, pos=(yPos, 0))
             textctrl = wx.TextCtrl(panel, value=value, size=size, name=label, style=wx.TE_PROCESS_ENTER)
             self.Bind(wx.EVT_TEXT_ENTER, handler, textctrl)
-            self.textCtrlFields[label]=textctrl
+            self.textPanelFields[label]=textctrl
 #            self.textCtrlHooks.append(textctrl)
             grid.Add(textctrl, (yPos, 1))
             
@@ -1193,12 +1770,11 @@ class DnldHQDataPanel(wx.Panel):
             text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
             grid.Add(text, pos=(yPos, 0))
             datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN | wx.adv.DP_SHOWCENTURY, name=label)
-            self.textCtrlFields[label]=datepicker
+            self.textPanelFields[label]=datepicker
 #            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DEFAULT)
             self.Bind(wx.adv.EVT_DATE_CHANGED, handler, datepicker)
             grid.Add(datepicker, (yPos, 1))          
     def createDatePickerBar(self, panel, grid, yPos=0):
-        #for dateTextItem in self.dateTextData():
         for dateTextItem in self.datePickerData():
             self.buildOneDatePicker(panel,grid, yPos, dateTextItem)
             yPos+=1
@@ -1218,34 +1794,38 @@ class DnldHQDataPanel(wx.Panel):
 
     # changer widget    
     def Evt_UpdateButtonPressed(self,event):
-        name = "update button" 
-        if (self.updateBtnCurrLabel == "Update Data"):
-            para = "updating data"
-            self.updateBtnCurrLabel = 'Stop'
-        elif (self.updateBtnCurrLabel == 'Stop'):
-            para = "stop updating"
-            self.updateBtnCurrLabel = "Update Data"
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue()
         pub.sendMessage("pubMsg_DnldHQdataPanel", msg=(name, para))
+        
+#        name = "update button" 
+#        if (self.updateBtnCurrLabel == "Update Data"):
+#            para = "updating data"
+#            self.updateBtnCurrLabel = 'Stop'
+#        elif (self.updateBtnCurrLabel == 'Stop'):
+#            para = "stop updating"
+#            self.updateBtnCurrLabel = "Update Data"
+#        pub.sendMessage("pubMsg_DnldHQdataPanel", msg=(name, para))
 
-    def Evt_UpdateButton(self, event):
-        if (self.updateBtnCurrLabel == 'update data'):
-            self.HQonoff=1
-            self.updateBtnCurrLabel = 'Stop'
-            self.updateHQbuttons.SetLabel(self.updateBtnCurrLabel)
-            for label in self.textCtrlFields:
-                self.textCtrlFields[label].Disable()
-            self.auTyperbx.Disable()        #not work, why?
-            self.gaugecount = 0
-            self.gauge.SetValue(self.gaugecount)
-            self.gauge.Show()
-            self.logger.AppendText('Evt_UpdateButton\n')
-            self.logger.AppendText('hq update start\n')
-        elif (self.updateBtnCurrLabel == 'Stop'):
+    #def Evt_UpdateButton(self, event):
+    #    if (self.updateBtnCurrLabel == 'update data'):
+    #        self.HQonoff=1
+    #        self.updateBtnCurrLabel = 'Stop'
+    #        self.updateHQbuttons.SetLabel(self.updateBtnCurrLabel)
+    #        for label in self.textPanelFields:
+    #            self.textPanelFields[label].Disable()
+    #        self.auTyperbx.Disable()        #not work, why?
+    #        self.gaugecount = 0
+    #        self.gauge.SetValue(self.gaugecount)
+    #        self.gauge.Show()
+    #        self.logger.AppendText('Evt_UpdateButton\n')
+    #        self.logger.AppendText('hq update start\n')
+    #    elif (self.updateBtnCurrLabel == 'Stop'):
             
-            logger.debug('clear self.HQonoff to 0, to stop hqupdate')
-            self.updateBtnCurrLabel = 'Update Data'
-            self.updateHQbuttons.Disable()
-        pub.sendMessage("pubMsg_DnldHQdataPanel", msg=self.updateBtnCurrLabel)
+    #        logger.debug('clear self.HQonoff to 0, to stop hqupdate')
+    #        self.updateBtnCurrLabel = 'Update Data'
+    #        self.updateHQbuttons.Disable()
+    #    pub.sendMessage("pubMsg_DnldHQdataPanel", msg=self.updateBtnCurrLabel)
 
     
     def get_startdate_byworkday(self,end_date_str, numofdays):
@@ -1271,8 +1851,8 @@ class DnldHQDataPanel(wx.Panel):
 #                #self.logger.AppendText("enable menu,msg=%s\n"%msg)
 ##                for textCtrlHook in self.textCtrlHooks:
 ##                    textCtrlHook.Enable()
-#                for label in self.textCtrlFields:
-#                    self.textCtrlFields[label].Enable()
+#                for label in self.textPanelFields:
+#                    self.textPanelFields[label].Enable()
                 
 #                self.updateHQbuttons.Enable()
 #                self.auTyperbx.Enable()
@@ -1415,4 +1995,11 @@ a=engine.execute(cmd)
 b=a.fetchall()
 N=20
 c=b[20][1]
+
+
+
+engine = create_engine('sqlite+pysqlite:///qfq_hqData.db', module=sqlite)
+cmd="SELECT * FROM hqall_t"
+a=engine.execute(cmd)
+
 '''
