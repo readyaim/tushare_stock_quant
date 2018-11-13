@@ -91,6 +91,7 @@ class Sqlite3Handler(object):
         self.hq_codes = self.get_codes()
         self.tablenm_hqall='hqall_t'
         self.date_tail = '00:00:00.000000'
+        self.maxDateInDBStr = self.getMaxDateInDB()
         
 
     def set_DBname_and_autype(self, autypeStr):
@@ -157,18 +158,39 @@ class Sqlite3Handler(object):
                 logger.error('fail to generate codes_table.csv, try again')
                 assert (1==0)
     
+    def getMaxDateInDB(self):
+        cmd = "SELECT MAX(%s) FROM %s WHERE code='%s'"%("date", self.tablenm_hqall, "600703")
+        try:
+            dateStr = self.engine.execute(cmd).fetchone()[0].split(" ")[0]
+            logger.info("maxinum date in database is %s", dateStr)
+        except Exception as e:
+            logger.error("Error to read max Date in getRPSbyDate!\n, %s",e)
+            return None
+        return dateStr
+        
+    def getClippedMaxDate(self, dateStr):
+        """Return the clipped (smaller) Max Date between(date in database, dateStr)
+        """
+        maxDateInDB = datetime.strptime(self.maxDateInDBStr, "%Y-%m-%d")
+        if (maxDateInDB<datetime.strptime(dateStr, "%Y-%m-%d")):
+            return self.maxDateInDBStr
+        else:
+            return dateStr
 class CalcRPS_Model(Sqlite3Handler):
     def __init__(self):
 
-#        self.start_date = datetime.now().strftime("%Y-%m-%d")
-        self.start_date = '2018-10-22'
+        self.start_date = datetime.now().strftime("%Y-%m-%d")
+        #self.start_date = '2018-10-22'
         self.end_date = datetime.now().strftime("%Y-%m-%d")
-        self.rpsNChoices=['120', '240']
-        self.rpsMktChoices = [u'全部', u'深市', u'沪市', u'创业板' ]
-        self.rpsRangeChoices = [u'全部', u'一年以上']
+#        self.rpsNChoices=['5','20','50','120', '240']
+#        self.rpsMktChoices = [u'全部', u'深市', u'沪市', u'创业板' ]
+#        self.rpsRangeChoices = [u'全部', u'一年以上']
         self.rpsN = '20'
-        self.rpsMktIdx = 0
-        self.rpsRangeIdx = 0
+        self.rpsMktValue = u'深市'
+        self.rpsRangeValue = u'一年以上'
+        self.rpsLow = '95'
+        self.rpsHigh = '100'
+        
         self.onoff=1
         #self.autype='qfq'
         super(CalcRPS_Model, self).__init__("nfq")
@@ -192,11 +214,17 @@ class CalcRPS_Model(Sqlite3Handler):
     def saveSelectedCodesToFavorite(self, selectedCodes):
         filename = "favorite.csv"
         mytime = datetime.now().strftime("%Y-%m-%d")
-        with open (filename, 'a+') as fw:
-            fw.write(mytime+':')
-            for i in selectedCodes:
-                fw.write(i+',')
-            fw.write('\n')
+        try:
+            with open (filename, 'a+') as fw:
+                fw.write(mytime+':')
+                for i in selectedCodes:
+                    fw.write(i+',')
+                fw.write('\n')
+            rlt=True
+        except Exception as e:
+            logger.error(e)
+            rlt = False
+        pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_saveSelectedCodesToFavorite", rlt))
     def getRPSbyCode(self, code):
         print("run getRPSbyCode: %s"%code)
         pct_nm = 'pct%s'%self.rpsN
@@ -234,26 +262,36 @@ class CalcRPS_Model(Sqlite3Handler):
         rps_nm = 'rps%s'%self.rpsN
         rpsN = int(self.rpsN)
         lowerPCT = 95
-#        self.start_date='2018-10-22'
-        self.targe_date = self.start_date+' '+self.date_tail
-        cmd="SELECT * FROM %s WHERE date = '%s'"%(self.tablenm_hqall, self.targe_date)
-        try:
-            df=pd.read_sql_query(cmd, self.engine)
-        except Exception as e:
-            logger.error("read rps data from %s error", self.tablenm_hqall)
-            logger.error(e)
+        rpsLow = int(self.rpsLow)
+        rpsHigh = int(self.rpsHigh)
+        if (rpsHigh>=rpsLow):
+    #        self.start_date='2018-10-22'
+            self.targe_date = self.getClippedMaxDate(self.start_date)+' '+self.date_tail
+                
+            cmd="SELECT * FROM %s WHERE date = '%s'"%(self.tablenm_hqall, self.targe_date)
+            try:
+                df=pd.read_sql_query(cmd, self.engine)
+            except Exception as e:
+                logger.error("read rps data from %s error", self.tablenm_hqall)
+                logger.error(e)
+                pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+                return
+            if (len(df)!=0):
+                logger.debug('read rps data from base to dataframe success! len = %d', len(df))    
+                df_pct_A = df[df[rps_nm]>rpsLow]
+                df_pct = df_pct_A[df_pct_A[rps_nm]<rpsHigh]
+                #print(df_pct)
+                #send out result
+                pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_getRPSbyDate", df_pct))
+            else:    
+                logger.debug('Error, database read rps error, len = %d', len(df))
+                #exception, terminate, and set panel on by sending msg="end_calcAllRPS"
+                pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+                return 
+        else:
+            #rpsHigh<rpsLow
             pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
-            return
-        if (len(df)==0):
-            logger.debug('Error, database read rps error, len = %d', len(df))
-            pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
-        else:    
-            logger.debug('read rps data from base to dataframe success! len = %d', len(df))    
-            df_pct = df[df[rps_nm]>lowerPCT]
-            #print(df_pct)
-        pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_getRPSbyDate", df_pct))
-        #pub.sendMessage("pubMsg_RPSRightUpPanel", msg=df_pct)
-        pass
+        
     
     
     def caculateOneCodeRPS(self, code="603999"):
@@ -887,4 +925,9 @@ df.sort_values(by='code')
 #转换 date'
 df['date_parsed'] = pd.to_datetime(df['date'], format = "%Y-%m-%d", errors = 'coerce')
 data['date_parsed'] = pd.to_datetime(data['Date'],infer_datetime_format=True)
+
+#选择数据库日期最大值
+engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite)
+cmd = "SELECT MAX(%s) FROM %s WHERE code='%s'"%("date", "hqall_t", "600703")
+
 '''

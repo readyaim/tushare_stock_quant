@@ -239,6 +239,9 @@ class RPSLeftPanel(wx.Panel):
         self.Show()
         self.SetDoubleBuffered(True)    #to avoid flickering of text
 ## Viewer ##
+
+    
+
     def buildRPS_InitDataBar(self):
 #        box = wx.StaticBox(self, -1, u"RPS初始化")
 #        staticsizer = wx.StaticBoxSizer(box, wx.HORIZONTAL)
@@ -268,9 +271,27 @@ class RPSLeftPanel(wx.Panel):
         
         staticsizer.AddSpacer(10)
         staticsizer.Add(vsizer)
-        
-        
         return staticsizer
+    
+    def setRpsMkt(self, value):
+        self.rpsTextLabelFields["cmbxMarket"].SetValue(value)
+        logger.debug("set cmbxMarket=%s",value)
+        pass
+    
+    def setRpsRange(self, value):
+        self.rpsTextLabelFields["cmbxRange"].SetValue(value)
+        logger.debug("set cmbxRange=%s",value)
+    
+    def setRpsHighValue(self, valueStr):
+        self.rpsTextLabelFields["scRPS_High"].SetValue(str(valueStr))
+        logger.debug("set RPS High =%s", str(valueStr))
+    
+    def setRpsLowValue(self, valueStr):
+        self.rpsTextLabelFields["scRPS_Low"].SetValue(str(valueStr))
+        logger.debug("set RPS Low =%s", str(valueStr))
+    
+    def setAllowInitCbx(self, value):
+        pass
         
     def setStartDate(self, date):
         self.rpsTextLabelFields["start_date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
@@ -318,14 +339,14 @@ class RPSLeftPanel(wx.Panel):
             self.Bind(wx.adv.EVT_DATE_CHANGED, eHandler, datepicker)
             sizer.Add(datepicker, 0, wx.ALL, 2)
     def buildRPSOptionData(self):
-        return (('N:', 0, self.rpsNChoices, self.EvtRPSn, "cmbxN"),
-                    (u'市场', 0, self.rpsMktChoices, self.EvtMktSetting, "market"),
-                    (u'范围', 0, self.rpsRangeChoices, self.EvtRangeSetting, "range"))
+        return (('N:', 0, self.rpsNChoices, self.EvtRPSn, "cmbxN", 45),
+                    (u'市场', 0, self.rpsMktChoices, self.EvtMktSetting, "cmbxMarket", 65),
+                    (u'范围', 0, self.rpsRangeChoices, self.EvtRangeSetting, "cmbxRange", 90))
     def buildOneRPSOption(self, sizer, dataItem):
-        for label, cmbxIdx, choices, eHandler, name in [dataItem]:
+        for label, cmbxIdx, choices, eHandler, name, size in [dataItem]:
             text = wx.StaticText(self, label=label)
             sizer.Add(text, 0, wx.ALL, 2)
-            cmbx = wx.ComboBox(self, size=(60, -1), choices=choices, value=choices[cmbxIdx],style=wx.CB_DROPDOWN|wx.CB_READONLY, name=name)
+            cmbx = wx.ComboBox(self, size=(size, -1), choices=choices, value=choices[cmbxIdx],style=wx.CB_DROPDOWN|wx.CB_READONLY, name=name)
             self.rpsTextLabelFields[name] = cmbx
             self.Bind(wx.EVT_COMBOBOX, eHandler, cmbx)
             sizer.Add(cmbx, 0, wx.ALL, 2)
@@ -344,8 +365,8 @@ class RPSLeftPanel(wx.Panel):
         sizer.Add(self.startRPSStartBtn, 0, wx.ALIGN_CENTER,2)
         
     def buildRPSRangeData(self):
-        return ((u'RPS 从', 100, self.rpsRangeFrom, "scRPS_start"),
-                    (u'至', 80, self.rpsRangeTo, "scRPS_end"))
+        return ((u'RPS 从', 100, self.rpsRangeHigh, "scRPS_High"),
+                    (u'至', 80, self.rpsRangeLow, "scRPS_Low"))
     def buildOneRPSRange(self, sizer, dataItem):
 #        hsizer = wx.BoxSizer(wx.HORIZONTAL)
         for label, initvalue, eHandler,name in [dataItem]:
@@ -406,14 +427,29 @@ class RPSLeftPanel(wx.Panel):
         pass
     
         
-    def EvtRangeSetting(self,e):
-        pass
-    def EvtMktSetting(self,e):
-        pass
-    def rpsRangeFrom(self,e):
-        pass
-    def rpsRangeTo(self,e):
-        pass    
+    def EvtRangeSetting(self,event):
+        "cmbxRange"
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+        
+    def EvtMktSetting(self,event):
+        "cmbxMarket"
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+        
+    def rpsRangeHigh(self,event):
+        "scRPS_High"
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+
+    def rpsRangeLow(self,event):
+        "scRPS_Low"
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
     
     def Evt_RPStartBtn(self, event):
         name = 'rpsStartButton'
@@ -474,6 +510,7 @@ class RPSRightUpPanel(wx.Panel):
             df={}
         return df
     def updateTable(self, data):
+        self.grid.BeginBatch()
         self.grid.ClearGrid()
         self.data=data
 #        self.table.setData(self.data)
@@ -491,9 +528,12 @@ class RPSRightUpPanel(wx.Panel):
         self.grid.AutoSize()
         self.grid.Refresh()
         self.grid.ForceRefresh()
+        self.grid.EndBatch()
 #        self.sizer.Fit(self)
 #        self.SetSizer(self.sizer)
 
+    def setGridSelectionOFF(self):
+        self.grid.ClearSelection()
     def Evt_GridLabelLeftDClick(self,event):
         self.labelDClickDict[event.Col] = (self.labelDClickDict.get(event.Col, 0)+1)%2
 #        print(event.Col)
@@ -524,7 +564,7 @@ class RPSRightUpPanel(wx.Panel):
             para.append(self.data.iloc[idx, codeIdx])
         name = "rpsRightUp_rightClick"
         pub.sendMessage("pubMsg_RPSRightUpPanel", msg=(name, para))
-        
+        #event.GetEventObject().ClearSelection()
     def Evt_GridLeftClick(self,event):
         #self.selectedRowsList = event.GetEventObject().GetSelectedRows().append(event.Row)
         pass
@@ -1005,31 +1045,56 @@ class RPSRightDownPanel(wx.Panel):
 #   
 #   
 #        self.RightPanel.SetSizer(self.FlexGridSizer)  
-#           
-        self.BoxSizer=wx.BoxSizer(wx.HORIZONTAL)  
+#      
+        
+     
+        self.BoxSizer=wx.BoxSizer(wx.VERTICAL)  
+        self.BoxSizer.AddSpacer(5)
+        for label, eHandler, name in [self.buildCheckBoxData()]:
+            self.buildOneCheckBox(label, eHandler, name, self.BoxSizer)
         self.BoxSizer.Add(self.MPL, proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)  
 #        self.BoxSizer.Add(self.RightPanel,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)  
-       
+        self.SetBackgroundColour("white")
         self.SetSizer(self.BoxSizer)
         self.Fit()
         #MPL_Frame界面居中显示  
         self.Centre(wx.BOTH)  
-   
+        self.displayMany=False
+    def buildCheckBoxData(self):
+        return(u"显示多条", self.EvtCheckBox, 'rpsInitCbx')
+    
+    def buildOneCheckBox(self, label, eHandler, name, sizer):
+        cbx = wx.CheckBox(self, label=label, name=name)
+        #self.rpsTextLabelFields[name]=cbx
+        self.Bind(wx.EVT_CHECKBOX, eHandler, cbx)
+        sizer.Add(cbx, 0, wx.ALL, 2)
     def displayOneRPSbyCode(self, df):
         import matplotlib.dates as mdate
         #把date string转换成datetime
         x =  pd.to_datetime(df.iloc[:,0], format = "%Y-%m-%d", errors = 'coerce')
 #        x =  pd.to_datetime(df.iloc[:,0],infer_datetime_format=True)
         y = df.iloc[:,1]
-        self.axes.cla()
-        self.axes.plot(x,y,'--b*')  
-        self.axes.set_title(df.loc[0,'code'])
+        if (not self.displayMany):
+            self.axes.cla()
+        self.axes.plot(x,y,'-', label=df.loc[0,'code'])  
+        handles, labels = self.axes.get_legend_handles_labels()
+        self.axes.legend(handles[::-1], labels[::-1])
+        #self.axes.set_title(df.loc[0,'code'])
+        self.axes.set_title("RPS Lines for Stock")
 #        self.axes.plot(df,'--b*')  
         self.axes.grid(True)
         self.axes.xaxis.set_major_formatter(mdate.DateFormatter('%Y-%m-%d'))
 
         #print(dir(self.FigureCanvas))
         self.FigureCanvas.draw()#一定要实时更新  
+    def EvtCheckBox(self,event):
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue()
+        if (para == True):
+            self.displayMany=True
+        else:
+            self.displayMany=False
+    
     #按钮事件,用于测试绘图  
     def Button1Event(self,event):  
         x=np.arange(-10,10,0.25)  
@@ -1380,6 +1445,10 @@ class Controller_RPS(object):
         self.view.setEndDate(self.model.end_date)
         self.view.setRPSN(self.model.rpsN)
         self.view.setAuType(self.model.autypeStr)
+        self.view.setRpsMkt(self.model.rpsMktValue)
+        self.view.setRpsRange(self.model.rpsRangeValue)
+        self.view.setRpsHighValue(self.model.rpsHigh)
+        self.view.setRpsLowValue(self.model.rpsLow)
         
         self.viewRight = viewRight
         
@@ -1426,7 +1495,20 @@ class Controller_RPS(object):
                     self.model.set_DBname_and_autype(msg[1])
             if (msg[0]=="rpsStartButton"):
                 self.worker_rpsStartButton(msg[1])
+            if (msg[0]=="cmbxMarket"):
+                self.model.rpsMktValue=msg[1]
+                logger.debug("rpsMktValue = %s", self.model.rpsMktValue)
+            if (msg[0]=="cmbxRange"):
+                self.model.rpsRangeValue=msg[1]
+                logger.debug("rpsRangeValue = %s", self.model.rpsRangeValue)
+            if (msg[0]=="scRPS_High"):
+                self.model.rpsHigh=msg[1]
+                logger.debug("rpsHigh = %s", self.model.rpsHigh)
+            if (msg[0]=="scRPS_Low"):
+                self.model.rpsLow=msg[1]
+                logger.debug("rpsLow = %s", self.model.rpsLow)
         pass
+        
     
     def worker_rpsStartButton(self, para):
         if (para == 'rpsStartBtn'):
@@ -1474,7 +1556,8 @@ class Controller_RPS(object):
 
             elif (msg[0]=="end_getRPSbyCode"):
                 self.viewRight.splitterpanel2.displayOneRPSbyCode(msg[1])
-                
+            elif (msg[0]=="end_saveSelectedCodesToFavorite"):
+                self.viewRight.splitterpanel1.setGridSelectionOFF()
         elif isinstance(msg, str):
             if msg == "end_calcAllRPS":
                 self.view.setRPSPanelOn()
