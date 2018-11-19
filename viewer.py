@@ -30,8 +30,11 @@ from pandas import Series, DataFrame
 #to draw K-line
 import mpl_finance as mpf
 from matplotlib.pylab import date2num
+import matplotlib.ticker as ticker
 import matplotlib.pyplot as plt
 import matplotlib  
+import matplotlib.dates as mdate
+import matplotlib.ticker as ticker
    
 
 #from twisted.internet import protocol, reactor, task
@@ -203,10 +206,11 @@ class PageOne(wx.Panel):
 class RPSLeftPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
-        self.rpsNChoices=['5','20','50','120', '240']
+        self.rpsNChoices=['5','20','50', '120', '250']
         self.rpsMktChoices = [u'全部', u'深市', u'沪市', u'创业板' ]
         self.rpsRangeChoices = [u'全部', u'一年以上']
         self.rpsTextLabelFields={}
+        
 #        t = wx.StaticText(self, -1, "This is a Page RPS Left object", (20,20), style=wx.ST_NO_AUTORESIZE)
         mainsizer = wx.BoxSizer(wx.VERTICAL)
         #RPS条件设置
@@ -227,21 +231,50 @@ class RPSLeftPanel(wx.Panel):
         sizer = self.buildRPS_InitDataBar()
         mainsizer.Add(sizer, 0, wx.EXPAND)
 
-        #启动按钮
-#        name = 'rpsBtn'
-#        self.startRPSbuttons = wx.Button(self, -1, "Start", name=name)        # add buttons
-#        self.rpsTextLabelFields[name]=self.startRPSbuttons
-#        self.Bind(wx.EVT_BUTTON, self.Evt_RPSstartButton, self.startRPSbuttons) 
+        mainsizer.AddSpacer(5)
         
+        # check box rps线N50, N120, N250选择
+        cbxSizer = self.buildRpsCheckBoxBar()
+        mainsizer.Add(cbxSizer, 0,  wx.ALL | wx.EXPAND)  
 
+        mainsizer.AddSpacer(5)
+
+        # Gauge
+        sizer = self.buildGauageBar()
+        mainsizer.Add(sizer, 0, wx.ALL|wx.EXPAND,2)
+                
+        #Percentage Changed Rank
+#        pctRandSizer = self.buildPctRankBar()
+#        mainsizer.Add(pctRandSizer, 0,  wx.ALL | wx.EXPAND)  
+        
         self.SetBackgroundColour("white")
         self.SetSizer(mainsizer)
         self.Show()
         self.SetDoubleBuffered(True)    #to avoid flickering of text
+        
 ## Viewer ##
-
+            
+    def buildRpsCheckBoxBar(self):
+        box = wx.StaticBox(self, -1, u"RPS指标选项")
+        hSizer = wx.StaticBoxSizer(box, wx.HORIZONTAL)
+        for rpsCbxItem in self.buildCheckBoxData():
+            self.buildOneCheckBox(hSizer, rpsCbxItem)
+        return hSizer
+        
+    def buildCheckBoxData(self):
+        return((u"显示多条", self.EvtCbxDrawing, 'nm_rpsCbxMultiDraw'),
+                    ("N50", self.EvtCbxDrawing, 'rpsCbxN50'),
+                    ("N120", self.EvtCbxDrawing, 'rpsCbxN120'),
+                    ("N250", self.EvtCbxDrawing, 'rpsCbxN250'),
+                    )
     
-
+    def buildOneCheckBox(self, sizer, rpsCbxItem):
+        for label, eHandler, name in [rpsCbxItem]:
+            cbx = wx.CheckBox(self, label=label, name=name)
+            self.rpsTextLabelFields[name]=cbx
+            self.Bind(wx.EVT_CHECKBOX, eHandler, cbx)
+            sizer.Add(cbx, 0, wx.ALL, 2)
+            
     def buildRPS_InitDataBar(self):
 #        box = wx.StaticBox(self, -1, u"RPS初始化")
 #        staticsizer = wx.StaticBoxSizer(box, wx.HORIZONTAL)
@@ -254,7 +287,7 @@ class RPSLeftPanel(wx.Panel):
         staticsizer.Add(self.auTyperbx)
         
         vsizer = wx.BoxSizer(wx.VERTICAL)
-        name = 'rpsInitCbx'
+        name = 'nmRpsInitCbx'
         cbx = wx.CheckBox(self, label=u'允许初始化', name=name)
         self.rpsTextLabelFields[name]=cbx
         self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, cbx)
@@ -289,15 +322,20 @@ class RPSLeftPanel(wx.Panel):
     def setRpsLowValue(self, valueStr):
         self.rpsTextLabelFields["scRPS_Low"].SetValue(str(valueStr))
         logger.debug("set RPS Low =%s", str(valueStr))
-    
+
+        
     def setAllowInitCbx(self, value):
         pass
         
-    def setStartDate(self, date):
-        self.rpsTextLabelFields["start_date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+    def setDatebyName(self, name, date):
+        self.rpsTextLabelFields[name].SetValue(datetime.strptime(date, "%Y-%m-%d"))
     
-    def setEndDate(self, date):
-        self.rpsTextLabelFields["end_date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+    def setStartDate(self, date):
+        self.rpsTextLabelFields["nm_RpsStartDate"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+   
+    def setRpsDay(self, value):
+        self.rpsTextLabelFields["scRPS_Day"].SetValue(str(value))
+        logger.debug("set RPS Days =%s", str(value))
 
     def setRPSN(self, days):
         self.rpsTextLabelFields["cmbxN"].SetValue(days)
@@ -312,23 +350,72 @@ class RPSLeftPanel(wx.Panel):
     def setRPSPanelOff(self):
         for label in self.rpsTextLabelFields:
             self.rpsTextLabelFields[label].Disable()
+        self.setRpsGauageShow()
         #self.rpsTextLabelFields["rpsTglBtn"].Enable()
     def setRPSPanelOn(self):
         for label in self.rpsTextLabelFields:
             self.rpsTextLabelFields[label].Enable()
         self.startRPSbuttons.Disable()
+        
+        if (not self.rpsTextLabelFields["nmRpsCbxPctRank"].GetValue()):
+            self.rpsTextLabelFields["nmRpsEndDate"].Disable()
+        self.rpsTextLabelFields["nmRpsInitCbx"].SetValue(False)
+#        self.rpsTextLabelFields["nmRpsEndDate"].SetValue(False)
+        # Hide gauage
+        self.rpsTextLabelFields["nmRpsGauage"].Hide()
     def setAuType(self, autype):
         self.auTyperbx.SetSelection(self.auTyperbx.FindString(autype))
         logger.debug("set auType to '%s'"%autype)
+    def setRPSbutton(self, status):
+        if (status == True):
+            self.startRPSbuttons.Enable()
+        else:
+            self.startRPSbuttons.Disable()
+    def setRpsEndDate(self, status):
+        if (status == True):
+            self.rpsTextLabelFields["nmRpsEndDate"].Enable()
+        else:
+            self.rpsTextLabelFields["nmRpsEndDate"].Disable()
+    
+    def setRpsGauageCount(self, counter):
+        self.rpsTextLabelFields["nmRpsGauage"].SetValue(counter)
+
+    def setRpsGauageShow(self):
+        self.rpsTextLabelFields["nmRpsGauage"].Show()
+
+    def setRpsGauageHide(self):
+        self.rpsTextLabelFields["nmRpsGauage"].Hide()
         
+    
+    def buildPctRankDateData(self):
+        return ((u"过去日期", "2018-10-31",self.EvtRPSDatePick,"nmRpsEndDate"),)
+    def buildPctRankBar(self):
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        for pctRankItem in self.buildPctRankDateData():
+            self.buildOneRPSDate(sizer, pctRankItem)
+        self.rpsTextLabelFields["nmRpsEndDate"].Disable()
+        sizer.AddSpacer(5)
+        name = 'nmRpsCbxPctRank'
+        cbx = wx.CheckBox(self, label=u'阶段涨幅', name=name)
+        self.rpsTextLabelFields[name]=cbx
+        self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, cbx)
+        sizer.Add(cbx, 0, wx.ALL, 2)
+        return sizer
+    
     def buildRPSDateData(self):
-        return ((u"开始日期", "2018-10-25",self.EvtRPSDatePick,"start_date"),
-                    (u"截止日期", "2018-10-31",self.EvtRPSDatePick,"end_date"))
+        return ((u"当前日期", "2018-10-25",self.EvtRPSDatePick,"nm_RpsStartDate"),)
+                    #(u"截止日期", "2018-10-31",self.EvtRPSDatePick,"end_date"))
     def buildRPSDateBar(self):
         hSizer = wx.BoxSizer(wx.HORIZONTAL)
         for chooseRPSDateItem in self.buildRPSDateData():
             self.buildOneRPSDate(hSizer, chooseRPSDateItem)
+        hSizer.AddSpacer(4)
+        self.buildOneRPSRange(hSizer, list(self.buildRPSDaysData()))
         return hSizer
+
+    def buildRPSDaysData(self):
+        #for label, initvalue, eHandler,name in [dataItem]:
+        return (u"天数", 120, self.EvtRpsDays, "scRPS_Day")
     def buildOneRPSDate(self, sizer, dataItem):
         for label, value, eHandler, name in [dataItem]:
             text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
@@ -339,14 +426,14 @@ class RPSLeftPanel(wx.Panel):
             self.Bind(wx.adv.EVT_DATE_CHANGED, eHandler, datepicker)
             sizer.Add(datepicker, 0, wx.ALL, 2)
     def buildRPSOptionData(self):
-        return (('N:', 0, self.rpsNChoices, self.EvtRPSn, "cmbxN", 45),
-                    (u'市场', 0, self.rpsMktChoices, self.EvtMktSetting, "cmbxMarket", 65),
-                    (u'范围', 0, self.rpsRangeChoices, self.EvtRangeSetting, "cmbxRange", 90))
+        return (('N:', 0, self.rpsNChoices, self.EvtRPSn, "cmbxN", 45, wx.CB_DROPDOWN|wx.CB_READONLY),
+                    (u'市场', 0, self.rpsMktChoices, self.EvtMktSetting, "cmbxMarket", 65, wx.CB_DROPDOWN|wx.CB_READONLY),
+                    (u'范围', 0, self.rpsRangeChoices, self.EvtRangeSetting, "cmbxRange", 90, wx.CB_DROPDOWN|wx.CB_READONLY))
     def buildOneRPSOption(self, sizer, dataItem):
-        for label, cmbxIdx, choices, eHandler, name, size in [dataItem]:
+        for label, cmbxIdx, choices, eHandler, name, size, style in [dataItem]:
             text = wx.StaticText(self, label=label)
             sizer.Add(text, 0, wx.ALL, 2)
-            cmbx = wx.ComboBox(self, size=(size, -1), choices=choices, value=choices[cmbxIdx],style=wx.CB_DROPDOWN|wx.CB_READONLY, name=name)
+            cmbx = wx.ComboBox(self, size=(size, -1), choices=choices, value=choices[cmbxIdx],style=style, name=name)
             self.rpsTextLabelFields[name] = cmbx
             self.Bind(wx.EVT_COMBOBOX, eHandler, cmbx)
             sizer.Add(cmbx, 0, wx.ALL, 2)
@@ -387,31 +474,56 @@ class RPSLeftPanel(wx.Panel):
         self.buildRPStartButton(hSizer)
         return hSizer
 
+    
+    def buildGauageBar(self):
+        # Gauge
+        hSizer = wx.BoxSizer(wx.HORIZONTAL)
+        name = "nmRpsGauage"
+        self.gaugecount=0
+        rpsgauge = wx.Gauge(self,-1, 100, size=(-1,4), name=name)
+        self.Bind(wx.EVT_IDLE, self.GaugeOnIdle, rpsgauge)
+        self.rpsTextLabelFields[name]=rpsgauge
+        rpsgauge.SetValue(self.gaugecount)
+        hSizer.Add(rpsgauge, 0, wx.ALL|wx.EXPAND)
+#        rpsgauge.Hide()      #Hide the gauage after SetSizer(mainSizer), to avoid abnormal display
+        return hSizer
             
     def buildRPSBar(self):
         box = wx.StaticBox(self, -1, u"RPS选项")
         staticsizer = wx.StaticBoxSizer(box, wx.VERTICAL)
         #row1
-        sizer = self.buildRPSDateBar()
+        #Percentage Changed Rank
+        sizer =self.buildPctRankBar()
         staticsizer.Add(sizer, 0, wx.ALL, 2)
 
-        #row2
-        sizer = self.buildRPSOptionBar()
+        # row2
+        sizer = self.buildRPSDateBar()
         staticsizer.Add(sizer, 0, wx.ALL, 2)
         
         #row3
+        sizer = self.buildRPSOptionBar()
+        staticsizer.Add(sizer, 0, wx.ALL, 2)
+        
+        #row4
         sizer = self.buildRPSRangeBar()
         staticsizer.Add(sizer, 0, wx.ALL, 2)
+        
         staticsizer.SetSizeHints(self)
         return staticsizer
-     
+    
+    def GaugeOnIdle(self, event):
+        pass
+    
+    def EvtCbxDrawing(self,event):
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+         
     def EvtCheckBox(self, event):
         name = event.GetEventObject().GetName()
         para = event.GetEventObject().GetValue()
-        if (para == True):
-            self.startRPSbuttons.Enable()
-        else:
-            self.startRPSbuttons.Disable()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+        
 
     def EvtRPSDatePick(self,event):
         name = event.GetEventObject().GetName()
@@ -426,6 +538,23 @@ class RPSLeftPanel(wx.Panel):
         #print(e.GetString())
         pass
     
+    def EvtRetNameValue(self):
+        ""
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+    
+    def EvtRetNameString(self):
+        "cmbxRange"
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+        
+    def EvtRetNameDatetime(self):
+        "datepick"
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue().Format('%Y-%m-%d')
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
         
     def EvtRangeSetting(self,event):
         "cmbxRange"
@@ -436,19 +565,28 @@ class RPSLeftPanel(wx.Panel):
     def EvtMktSetting(self,event):
         "cmbxMarket"
         name = event.GetEventObject().GetName()
-        para = event.GetString()
+#        para = event.GetString()
+        para = event.GetEventObject().GetValue()
         pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
         
     def rpsRangeHigh(self,event):
         "scRPS_High"
         name = event.GetEventObject().GetName()
-        para = event.GetString()
+        para = event.GetEventObject().GetValue()
         pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
 
     def rpsRangeLow(self,event):
         "scRPS_Low"
         name = event.GetEventObject().GetName()
-        para = event.GetString()
+#        para = event.GetString()
+        para = event.GetEventObject().GetValue()
+        pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
+    
+    def EvtRpsDays(self, event):
+        "scRPS_Day"
+        name = event.GetEventObject().GetName()
+#        para = event.GetString()
+        para = event.GetEventObject().GetValue()
         pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
     
     def Evt_RPStartBtn(self, event):
@@ -582,16 +720,18 @@ class RPSRightUpPanel(wx.Panel):
         
         event.Skip()
     def Evt_GridLeftDClick(self, event):
-        i=0
-        dateIdx = 0
-        codeIdx = 0
-        for col in self.data.columns:
-            if col =='code':
-                codeIdx=i
-            elif col =='date':
-                dateIdx=i
-            i+=1
+#        i=0
+#        dateIdx = 0
+#        codeIdx = 0
+#        for col in self.data.columns:
+#            if col =='code':
+#                codeIdx=i
+#            elif col =='date':
+#                dateIdx=i
+#            i+=1
         name = "RPSGridTableLeftDClick"
+        codeIdx = list((self.data).columns).index('code')
+        print("codeIdx = %d"%codeIdx)
         para = self.data.iloc[event.Row, codeIdx]
         pub.sendMessage("pubMsg_RPSRightUpPanel", msg=(name, para))
 #        self.SetSizer(self.sizer)
@@ -618,7 +758,7 @@ class PageThree(wx.Panel):
         mainsplitter.SetOrientation(wx.HORIZONTAL)
         mainsplitter.AppendWindow(self.splitterpanel1, -1)
         mainsplitter.AppendWindow(self.splitterpanel2, -1)
-        mainsplitter.SetSashPosition(0, 320)
+        mainsplitter.SetSashPosition(0, 300)
 #        mainsplitter.SetMinimumPaneSize(0)
         mainSizer = wx.BoxSizer(wx.VERTICAL)
         mainSizer.Add(mainsplitter, 1, wx.EXPAND | wx.ALL)
@@ -963,8 +1103,16 @@ class MPL_Panel(wx.Panel):
     def __init__(self,parent):    
         wx.Panel.__init__(self,parent=parent, id=-1)    
      
-        self.Figure = matplotlib.figure.Figure(figsize=(4,3))    
-        self.axes = self.Figure.add_axes([0.1,0.1,0.8,0.8])    
+        self.Figure = matplotlib.figure.Figure(figsize=(4,3)) 
+#        self.axes = self.Figure.add_axes([0.1,0.1,0.8,0.8])  
+        self.ax1 = self.Figure.add_subplot(2,1,1)
+        self.ax2 = self.Figure.add_subplot(2,1,2, sharex=self.ax1)
+        
+        
+        
+        # setup tight layout
+        self.Figure.subplots_adjust(left=0.06, bottom=0.1, right=0.99, top=0.99,wspace =0, hspace =0)
+#        self.Figure.tight_layout()
         self.FigureCanvas = FigureCanvas(self,-1,self.Figure)    
              
 #        #继承鼠标移动显示鼠标处坐标的事件    
@@ -975,10 +1123,11 @@ class MPL_Panel(wx.Panel):
 #        self.StaticText = wx.StaticText(self,-1,label='Show Help String')    
 #     
 #        self.SubBoxSizer = wx.BoxSizer(wx.HORIZONTAL)    
-#        self.SubBoxSizer.Add(self.NavigationToolbar,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)    
+        
 #        self.SubBoxSizer.Add(self.StaticText,proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)    
 #     
         self.TopBoxSizer = wx.BoxSizer(wx.VERTICAL)    
+#        self.TopBoxSizer.Add(self.NavigationToolbar,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)    
 #        self.TopBoxSizer.Add(self.SubBoxSizer,proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)    
         self.TopBoxSizer.Add(self.FigureCanvas,proportion =-10, border = 2,flag = wx.ALL | wx.EXPAND)    
      
@@ -995,44 +1144,22 @@ class MPL_Panel(wx.Panel):
             #也可以这样    
             #self.StaticText.SetLabel('%s,%s' % (ex,ey))       
 
-
-class RPSRightDownPanel_pre(wx.Panel):
-    """This class is a backup class for drawing NOTEBOOK like picture in wx.Panel.
-    not used in this project.
-    """
-    def __init__(self, parent):
-        wx.Panel.__init__(self, parent)
-        #t = wx.StaticText(self, -1, "This is a RPSRightDownPanel panel, used to draw RPS-Line of selected stock", (20,20))
-        #self.plotter = PlotNotebook(self)
-        self.plotter = aui.AuiNotebook(self)
-        sizer = wx.BoxSizer()
-        sizer.Add(self.plotter, 1, wx.EXPAND)
-        self.SetSizer(sizer)
-   
-    def displayOneRPSbyCode(self, df):
-        x = df.iloc[:,0]
-        y = df.iloc[:,1]
-        axes1 = self.plotter.add('figure 1').gca()
-        axes1.plot(x,y,'--b*')
+       
         
-    #    axes2 = plotter.add('figure 2').gca()
-    #    axes2.plot([1, 2, 3, 4, 5], [2, 1, 4, 2, 3])
-        self.Show()
-        
-        
-        
-        
-    #按钮事件,用于测试绘图  
-
 class RPSRightDownPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
 #        t = wx.StaticText(self, -1, "This is a RPSRightDownPanel panel, used to draw RPS-Line of selected stock", (20,20))
         self.MPL = MPL_Panel(self)  
         self.Figure = self.MPL.Figure  
-        self.axes = self.MPL.axes  
+#        self.axes = self.MPL.axes  
+        self.ax1 = self.MPL.ax1
+        self.ax2 = self.MPL.ax2
         self.FigureCanvas = self.MPL.FigureCanvas  
-           
+        self.rpsRightDownObj={}
+        self.displayMultiples=False
+        
+        
 #        self.RightPanel = wx.Panel(self,-1)  
 #        #测试按钮1  
 #        self.Button1 = wx.Button(self.RightPanel,-1,"TestButton",size=(100,40),pos=(10,10))  
@@ -1050,50 +1177,167 @@ class RPSRightDownPanel(wx.Panel):
      
         self.BoxSizer=wx.BoxSizer(wx.VERTICAL)  
         self.BoxSizer.AddSpacer(5)
-        for label, eHandler, name in [self.buildCheckBoxData()]:
-            self.buildOneCheckBox(label, eHandler, name, self.BoxSizer)
-        self.BoxSizer.Add(self.MPL, proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)  
+        
+        
+        
+#        self.BoxSizer.Add(self.MPL,flag = wx.ALL | wx.EXPAND)  
+        self.BoxSizer.Add(self.MPL, proportion =-1, border = 0,flag = wx.ALL | wx.EXPAND)  
 #        self.BoxSizer.Add(self.RightPanel,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)  
         self.SetBackgroundColour("white")
         self.SetSizer(self.BoxSizer)
         self.Fit()
         #MPL_Frame界面居中显示  
         self.Centre(wx.BOTH)  
-        self.displayMany=False
-    def buildCheckBoxData(self):
-        return(u"显示多条", self.EvtCheckBox, 'rpsInitCbx')
-    
-    def buildOneCheckBox(self, label, eHandler, name, sizer):
-        cbx = wx.CheckBox(self, label=label, name=name)
-        #self.rpsTextLabelFields[name]=cbx
-        self.Bind(wx.EVT_CHECKBOX, eHandler, cbx)
-        sizer.Add(cbx, 0, wx.ALL, 2)
-    def displayOneRPSbyCode(self, df):
-        import matplotlib.dates as mdate
-        #把date string转换成datetime
-        x =  pd.to_datetime(df.iloc[:,0], format = "%Y-%m-%d", errors = 'coerce')
-#        x =  pd.to_datetime(df.iloc[:,0],infer_datetime_format=True)
-        y = df.iloc[:,1]
-        if (not self.displayMany):
-            self.axes.cla()
-        self.axes.plot(x,y,'-', label=df.loc[0,'code'])  
-        handles, labels = self.axes.get_legend_handles_labels()
-        self.axes.legend(handles[::-1], labels[::-1])
-        #self.axes.set_title(df.loc[0,'code'])
-        self.axes.set_title("RPS Lines for Stock")
-#        self.axes.plot(df,'--b*')  
-        self.axes.grid(True)
-        self.axes.xaxis.set_major_formatter(mdate.DateFormatter('%Y-%m-%d'))
+        
+        
 
-        #print(dir(self.FigureCanvas))
+
+    def date_to_num(self, date):
+        date_time = datetime.strptime(date.split(' ')[0],'%Y-%m-%d')
+        num_date = date2num(date_time)
+        return num_date
+    
+    def displayCandleStick(self,df):
+        
+        #display last 200 days
+#        daysRequested = 20
+#        df=df_raw.iloc[-daysRequested:,:].copy()
+#        df=df_raw.iloc[-daysRequested:,:]
+
+#        self.date_tickers=df.date.values
+#        weekday_quotes=[tuple([i]+list(quote[1:])) for i,quote in enumerate(data.values)]
+#        print (weekday_quotes)
+
+#        self.ax1.xaxis.set_major_formatter(ticker.FuncFormatter(self.format_date))
+        
+#        df['date'] = df.loc[:,'date'].apply(self.date_to_num)  #Display blank in non-trade day
+        
+        df['date'] = df.loc[:,'date'].apply(lambda x: datetime.strptime(x.split(' ')[0],'%Y-%m-%d'))  #Display blank in non-trade day
+        def format_date(x,pos=None):
+            #保证下标不越界,很重要,越界会导致最终plot坐标轴label无显示
+            thisind = np.clip(int(x+0.5), 0, len(df)-1)
+            return df.date[thisind].strftime('%Y-%m-%d')
+        
+        #         日期,   开盘,     收盘,    最高,      最低,   成交量,    代码
+        mat_df=df[['date_idx','open','close','high','low','volume','code']].values
+
+        self.ax1.cla()
+        
+        mpf.candlestick_ochl(self.ax1, mat_df, width=0.6, colorup='r', colordown='g', alpha=1.0)
+#        self.ax1.xaxis.set_major_locator(ticker.MultipleLocator(6))
+        self.ax1.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
+        self.ax1.grid(True)
         self.FigureCanvas.draw()#一定要实时更新  
-    def EvtCheckBox(self,event):
-        name = event.GetEventObject().GetName()
-        para = event.GetEventObject().GetValue()
-        if (para == True):
-            self.displayMany=True
-        else:
-            self.displayMany=False
+        
+
+    def displayOneRPSbyCode(self, df, rps_nms):
+        
+#        df =df_raw.copy()
+        #df['date'] = df.loc[:,'date'].apply(lambda x: datetime.strptime(x.split(' ')[0],'%Y-%m-%d'))  #Display blank in non-trade day
+        if (isinstance(rps_nms, str)):
+            rps_nm = rps_nms
+        # generate idx of columns, why only idx is working, ['code'] is not working.
+        rpsIdxes = []
+        for col in rps_nms:
+            rpsIdxes.append(list(df.columns).index(col))
+        
+        #Remove dup value in rpsIdxes
+        rpsIdxes = list(set(rpsIdxes))
+        if (not self.displayMultiples):
+            self.ax2.cla()
+
+        x = df.date_idx
+        for idx in rpsIdxes:
+            y = df.iloc[:,idx]
+            self.ax2.plot(x,y,'-', label=list(df.columns)[idx]+':'+df.loc[0,'code'])  
+
+        handles, labels = self.ax2.get_legend_handles_labels()
+        self.ax2.legend(handles[::-1], labels[::-1], loc='lower left')
+        #self.ax2.set_title("RPS Lines for Stock")
+        self.ax2.grid(True)
+#        self.ax2.xaxis.set_major_formatter(mdate.DateFormatter('%Y-%m-%d'))
+#        self.ax2.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
+
+        #self.Figure.align_xlabels(self.ax1)
+        
+        #self.FigureCanvas.draw()#一定要实时更新  
+
+
+    def displayCandleStick_BACKUP(self,df):
+        #display last 200 days
+#        daysRequested = 20
+#        df=df_raw.iloc[-daysRequested:,:].copy()
+#        df=df_raw.iloc[-daysRequested:,:]
+
+#        self.date_tickers=df.date.values
+#        weekday_quotes=[tuple([i]+list(quote[1:])) for i,quote in enumerate(data.values)]
+#        print (weekday_quotes)
+#        self.ax1.xaxis.set_major_locator(ticker.MultipleLocator(6))
+#        self.ax1.xaxis.set_major_formatter(ticker.FuncFormatter(self.format_date))
+        
+#        df['date'] = df.loc[:,'date'].apply(self.date_to_num)  #Display blank in non-trade day
+        df['date'] = range(0, len(df))  #Replace date with [0,1,2...], won't display blank in non-trade day
+        df=df[['date','open','close','high','low','volume','code']]
+        mat_df = df.values
+        # 生成横轴的刻度名字
+        
+        #         日期,   开盘,     收盘,    最高,      最低,   成交量,    代码
+        self.ax1.cla()
+        
+        mpf.candlestick_ochl(self.ax1, mat_df, width=0.6, colorup='r', colordown='g', alpha=1.0)
+        #mpf.candlestick_ochl(self.ax2, mat_df, width=0.6, colorup='g', colordown='r', alpha=1.0)
+        self.ax1.grid(True)
+        self.FigureCanvas.draw()#一定要实时更新  
+
+        
+    def displayOneRPSbyCode_BACKUP(self, df, rps_nms):
+        import matplotlib.dates as mdate
+        import matplotlib.ticker as ticker
+        
+#        def format_date(x,pos=None):
+#            if x<0 or x>len(date_tickers)-1:
+#                return ''
+#            return date_tickers[int(x)]
+#        date_tickers =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y-%m-%d", errors = 'coerce')
+#        print(date_tickers)
+
+        #date_tickers=df.date.values
+#        x =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y-%m-%d", errors = 'coerce')
+#        x =  pd.to_datetime(df.iloc[:,0],infer_datetime_format=True)
+#        x = list(range(0, len(df)))        
+#        x = df.date.values
+        #把date string转换成datetime
+#        
+
+        if (isinstance(rps_nms, str)):
+            rps_nm = rps_nms
+        rpsIdxes = []
+        for col in rps_nms:
+            rpsIdxes.append(list(df.columns).index(col))
+        #rpsIdxes = list(df.columns).index(rps_nm)
+        #Remove dup value in rpsIdxes
+        rpsIdxes = list(set(rpsIdxes))
+#        y = df.iloc[:,rpsIdxes]
+        if (not self.displayMultiples):
+            self.ax2.cla()
+#        self.axes.plot(x,y,'-', label=df.loc[0,'code'])  
+        dateIdx = list(df.columns).index('date')
+        x =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y-%m-%d", errors = 'coerce')
+        for idx in rpsIdxes:
+            y = df.iloc[:,idx]
+            self.ax2.plot(x,y,'*', label=list(df.columns)[idx]+':'+df.loc[0,'code'])  
+
+        handles, labels = self.ax2.get_legend_handles_labels()
+        self.ax2.legend(handles[::-1], labels[::-1], loc='lower left')
+        #self.ax2.xaxis.set_major_locator(ticker.MultipleLocator(6))        
+        #self.ax2.set_title("RPS Lines for Stock")
+#        self.axes.plot(df,'--b*')  
+        self.ax2.grid(True)
+        self.ax2.xaxis.set_major_formatter(mdate.DateFormatter('%Y-%m-%d'))
+#        self.ax2.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
+
+        self.Figure.align_xlabels(self.ax1)
+        self.FigureCanvas.draw()#一定要实时更新      
     
     #按钮事件,用于测试绘图  
     def Button1Event(self,event):  
@@ -1109,9 +1353,12 @@ class RPSRightPanel(wx.Panel):
         self.mainsplitter = MultiSplitterWindow(self, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
         self.splitterpanel1 = RPSRightUpPanel(self.mainsplitter)
         self.splitterpanel2 = RPSRightDownPanel(self.mainsplitter)
+#        self.splitterpanel3 = RPSRightMiddlePanel(self.mainsplitter)
+        
         self.mainsplitter.SetOrientation(wx.VERTICAL)
         self.mainsplitter.AppendWindow(self.splitterpanel1, -1)
         self.mainsplitter.AppendWindow(self.splitterpanel2, -1)
+#        self.mainsplitter.AppendWindow(self.splitterpanel3, -1)
         # workaround for scroller bar
         # Scroller bar can not be displayed normally, except the window size is changed.
         # So ,I change the SetSashPosition back and force every time after Table is updated.
@@ -1143,32 +1390,22 @@ class RightDownPanel(wx.Panel):
         self.SetDoubleBuffered(True)
 #        
 #        self.Figure = matplotlib.figure.Figure(figsize=(4,3))    
-#        self.axes = self.Figure.add_axes([0.1,0.1,0.8,0.8])    
+#        self.axes = self.Figure.add_axes([0.1,0.1,0.8,0.8], label="1")    
+#        self.axCandle = self.Figure.add_axes([0.1,0.1,0.8,0.8], label="2")    
 #        self.FigureCanvas = FigureCanvas(self,-1,self.Figure)    
 #             
-#        #继承鼠标移动显示鼠标处坐标的事件    
-#        self.FigureCanvas.mpl_connect('motion_notify_event',self.MPLOnMouseMove)    
-#             
-#        self.NavigationToolbar = NavigationToolbar(self.FigureCanvas)    
-#     
-#        self.StaticText = wx.StaticText(self,-1,label='Show Help String')    
-#     
-#        self.SubBoxSizer = wx.BoxSizer(wx.HORIZONTAL)    
-#        self.SubBoxSizer.Add(self.NavigationToolbar,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)    
-#        self.SubBoxSizer.Add(self.StaticText,proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)    
-#     
+#        
 #        self.TopBoxSizer = wx.BoxSizer(wx.VERTICAL)    
-#        self.TopBoxSizer.Add(self.SubBoxSizer,proportion =-1, border = 2,flag = wx.ALL | wx.EXPAND)    
 #        self.TopBoxSizer.Add(self.FigureCanvas,proportion =-10, border = 2,flag = wx.ALL | wx.EXPAND)    
 #     
 #        self.SetSizer(self.TopBoxSizer)    
 #        
 #        
-        try:
+#        try:
 #            wx.CallAfter(self.test_drawCandleFig)
-            pass
-        except Exception as e:
-            logger.debug(e)
+#            pass
+#        except Exception as e:
+#            logger.debug(e)
     #显示坐标值        
 #    def MPLOnMouseMove(self,event):    
 #     
@@ -1202,18 +1439,18 @@ class RightDownPanel(wx.Panel):
         #         日期,   开盘,     收盘,    最高,      最低,   成交量,    代码
         #mat_df[:3]
         
-        fig, ax = plt.subplots(figsize=(8,2))
-        fig.subplots_adjust(bottom=0.5)
-        mpf.candlestick_ochl(ax, mat_df, width=0.6, colorup='g', colordown='r', alpha=1.0)
-        plt.grid(True)
-        # 设置日期刻度旋转的角度 
-        plt.xticks(rotation=30)
-        plt.title("%s"%code.split('.')[0])
-        plt.xlabel('Date')
-        plt.ylabel('Price')
-        # x轴的刻度为日期
-        ax.xaxis_date()
-        plt.show()
+#        fig, ax = plt.subplots(figsize=(8,2))
+#        fig.subplots_adjust(bottom=0.5)
+        mpf.candlestick_ochl(self.axCandle, mat_df, width=0.6, colorup='g', colordown='r', alpha=1.0)
+#        plt.grid(True)
+#        # 设置日期刻度旋转的角度 
+#        plt.xticks(rotation=30)
+#        plt.title("%s"%code.split('.')[0])
+#        plt.xlabel('Date')
+#        plt.ylabel('Price')
+#        # x轴的刻度为日期
+#        ax.xaxis_date()
+#        plt.show()
         ###candlestick_ochl()函数的参数
         # ax 绘图Axes的实例
         # mat_df 价格历史数据
@@ -1355,7 +1592,7 @@ class Viewer(wx.Frame):
         nb.AddPage(self.page2, "数据更新")
         nb.AddPage(self.page3, "RPS")
         # Choose Page 2
-        nb.SetSelection(2)
+        nb.SetSelection(1)
         # finally, put the notebook in a sizer for the panel to manage
         # the layout
         self.SetBackgroundColour("white")
@@ -1441,14 +1678,18 @@ class Controller_RPS(object):
         logger.debug("hello, %s",__class__)
         self.model = model
         self.view = view
-        self.view.setStartDate(self.model.start_date)
-        self.view.setEndDate(self.model.end_date)
+        self.view.setRpsGauageHide()
+#        self.view.setStartDate(self.model.rpsStartDate)
+        self.view.setDatebyName("nm_RpsStartDate", self.model.rpsStartDate)
+        self.view.setRpsDay(self.model.rpsDayCount)
         self.view.setRPSN(self.model.rpsN)
         self.view.setAuType(self.model.autypeStr)
         self.view.setRpsMkt(self.model.rpsMktValue)
         self.view.setRpsRange(self.model.rpsRangeValue)
         self.view.setRpsHighValue(self.model.rpsHigh)
         self.view.setRpsLowValue(self.model.rpsLow)
+#        self.view.setDatebyName("pctRank_startdate", self.model.pctRank_startdate)
+        self.view.setDatebyName("nmRpsEndDate", self.model.rps_enddate)
         
         self.viewRight = viewRight
         
@@ -1478,12 +1719,12 @@ class Controller_RPS(object):
         logger.debug("pubMsg_RPSLeftPanel: msg = %s", msg)
         if (isinstance(msg, tuple)):
             #tuple(name, para) style
-            if (msg[0]=="start_date"):
-                self.model.start_date = msg[1]
-                logger.debug("RPS start date changed, = %s", self.model.start_date)
-            if (msg[0]=="end_date"):
-                self.model.end_date = msg[1]
-                logger.debug("RPS end date changed, = %s", self.model.end_date)
+            if (msg[0]=="nm_RpsStartDate"):
+                self.model.rpsStartDate = msg[1]
+                logger.debug("RPS rpsStartDate = %s", self.model.rpsStartDate)
+            if (msg[0]=="nmRpsEndDate"):
+                self.model.rpsEndDate = msg[1]
+                logger.debug("RPS rpsEndDate = %s", self.model.rpsEndDate)
             if (msg[0]=="cmbxN"):
                 self.model.rpsN=msg[1]
                 logger.debug("rpsN = %s", self.model.rpsN)
@@ -1507,6 +1748,25 @@ class Controller_RPS(object):
             if (msg[0]=="scRPS_Low"):
                 self.model.rpsLow=msg[1]
                 logger.debug("rpsLow = %s", self.model.rpsLow)
+            if (msg[0]=="scRPS_Day"):
+                self.model.rpsDayCount=msg[1]
+                logger.debug("rpsDayCount = %s", self.model.rpsDayCount)
+            if (msg[0]=="nm_rpsCbxMultiDraw"):
+                self.viewRight.splitterpanel2.displayMultiples=msg[1]
+                logger.debug("RPSRightDown.displayMultiples = %s", msg[1])
+            if (msg[0][:7]=="rpsCbxN"):
+                if (msg[1]):
+                    self.model.rpsNList.append('rps%s'%msg[0][7:])
+                else:
+                    self.model.rpsNList.remove('rps%s'%msg[0][7:])
+                logger.debug("%s = %s", msg[0], 'rps%s'%msg[0][7:])
+                logger.debug("rpsNList =%s", self.model.rpsNList)
+            if (msg[0]=="nmRpsInitCbx"):
+                self.view.setRPSbutton(msg[1])
+            if (msg[0]=="nmRpsCbxPctRank"):
+                self.view.setRpsEndDate(msg[1])
+                self.model.rpsCbxPctRankStatus=msg[1]
+                logger.debug("self.rpsCbxPctRankStatus =%s", str(self.model.rpsCbxPctRankStatus))
         pass
         
     
@@ -1550,14 +1810,17 @@ class Controller_RPS(object):
                 self.viewRight.splitterpanel1.updateTable(msg[1])
                 self.view.setRPSPanelOn()
                 #to refresh RPSRightDownPanel
-                #self.viewRight.splitterpanel2.Show()
+                # workaround to fix the scroller disappear bar
                 self.viewRight.updateSashPosition()
-                
 
             elif (msg[0]=="end_getRPSbyCode"):
-                self.viewRight.splitterpanel2.displayOneRPSbyCode(msg[1])
+                self.viewRight.splitterpanel2.displayOneRPSbyCode(msg[1][0], msg[1][1])
+                self.viewRight.splitterpanel2.displayCandleStick(msg[1][0])
+
             elif (msg[0]=="end_saveSelectedCodesToFavorite"):
                 self.viewRight.splitterpanel1.setGridSelectionOFF()
+            elif (msg[0]=="nmRpsGauage"):
+                self.view.setRpsGauageCount(msg[1])
         elif isinstance(msg, str):
             if msg == "end_calcAllRPS":
                 self.view.setRPSPanelOn()
@@ -1658,7 +1921,8 @@ class Controller_dnldData(object):
             self.model.HQonoff=1
             logger.debug("pubMsg_DnldHQdataPanel: start data update")
             #update button pressed, to start, from viewer
-            t = threading.Thread(target=self.model.updateHQdata, args=())
+            #t = threading.Thread(target=self.model.updateHQdata, args=())
+            t = threading.Thread(target=self.model.updateHQdataByDate, args=())
             t.start()
         elif (para ==False):
             self.model.HQonoff=0
@@ -1739,7 +2003,7 @@ class DnldHQDataPanel(wx.Panel):
         
         # Gauge
         self.gaugecount=0
-        self.gauge = wx.Gauge(self,-1, G_NUM_OF_CODES, size=(80,20))
+        self.gauge = wx.Gauge(self,-1, 100, size=(80,20))
         grid.Add(self.gauge, pos=(startY+1, startX+1))
         self.Bind(wx.EVT_IDLE, self.GaugeOnIdle, self.gauge)
         self.gauge.SetValue(self.gaugecount)
@@ -1807,6 +2071,7 @@ class DnldHQDataPanel(wx.Panel):
         self.gauge.SetValue(self.gaugecount)
         self.updateBtnCurrLabel = 'Update Data'
         self.updateHQbuttons.SetLabel(self.updateBtnCurrLabel)
+        self.updateHQbuttons.SetValue(False)
     
     def setPanelOff(self):
         for label in self.textPanelFields:

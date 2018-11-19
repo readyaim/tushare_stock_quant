@@ -4,7 +4,7 @@
 !/**/
 ## include all *.c files in root and subfolders
 !*.py
-!codes_table.csv
+!stock_basic.csv
 #!*.txt
 !*.bat
 !.gitignore
