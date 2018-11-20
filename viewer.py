@@ -1260,11 +1260,12 @@ class RPSRightDownPanel(wx.Panel):
         x = df.date_idx
         for idx in rpsIdxes:
             y = df.iloc[:,idx]
-            self.ax2.plot(x,y,'-', label=list(df.columns)[idx]+':'+df.loc[0,'ts_code'])  
+#            self.ax2.plot(x,y,'-', label=list(df.columns)[idx]+':'+df.loc[0,'ts_code'])  
+            self.ax2.plot(x,y,'-', label=list(df.columns)[idx])  
 
         handles, labels = self.ax2.get_legend_handles_labels()
-        #self.ax2.legend(handles[::-1], labels[::-1], loc='lower left')
-        self.ax2.legend(handles[::-1], labels[::-1], loc='best')
+        self.ax2.legend(handles[::-1], labels[::-1], loc='lower left', fontsize = 'x-small')
+#        self.ax2.legend(handles[::-1], labels[::-1], loc='best', fontsize = 'x-small')
         #self.ax2.set_title("RPS Lines for Stock")
         self.ax2.grid(True)
 #        self.ax2.xaxis.set_major_formatter(mdate.DateFormatter("%Y%m%d"))
