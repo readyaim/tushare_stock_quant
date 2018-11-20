@@ -328,10 +328,10 @@ class RPSLeftPanel(wx.Panel):
         pass
         
     def setDatebyName(self, name, date):
-        self.rpsTextLabelFields[name].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.rpsTextLabelFields[name].SetValue(datetime.strptime(date, "%Y%m%d"))
     
     def setStartDate(self, date):
-        self.rpsTextLabelFields["nm_RpsStartDate"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.rpsTextLabelFields["nm_RpsStartDate"].SetValue(datetime.strptime(date, "%Y%m%d"))
    
     def setRpsDay(self, value):
         self.rpsTextLabelFields["scRPS_Day"].SetValue(str(value))
@@ -341,6 +341,11 @@ class RPSLeftPanel(wx.Panel):
         self.rpsTextLabelFields["cmbxN"].SetValue(days)
         logger.debug("set N=%s",days)        
 
+    def setRpsNwindow(self, status):
+        if status==True:
+            self.rpsTextLabelFields["cmbxN"].Disable()
+        else:
+            self.rpsTextLabelFields["cmbxN"].Enable()
     def setStartButtonLabel(self, name):
         self.toggleButton.SetLabel(name)
 
@@ -385,10 +390,9 @@ class RPSLeftPanel(wx.Panel):
 
     def setRpsGauageHide(self):
         self.rpsTextLabelFields["nmRpsGauage"].Hide()
-        
     
     def buildPctRankDateData(self):
-        return ((u"过去日期", "2018-10-31",self.EvtRPSDatePick,"nmRpsEndDate"),)
+        return ((u"过去日期", "20181031",self.EvtRPSDatePick,"nmRpsEndDate"),)
     def buildPctRankBar(self):
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         for pctRankItem in self.buildPctRankDateData():
@@ -403,14 +407,15 @@ class RPSLeftPanel(wx.Panel):
         return sizer
     
     def buildRPSDateData(self):
-        return ((u"当前日期", "2018-10-25",self.EvtRPSDatePick,"nm_RpsStartDate"),)
-                    #(u"截止日期", "2018-10-31",self.EvtRPSDatePick,"end_date"))
+        return ((u"当前日期", "20181025",self.EvtRPSDatePick,"nm_RpsStartDate"),)
+                    #(u"截止日期", "20181031",self.EvtRPSDatePick,"end_date"))
     def buildRPSDateBar(self):
         hSizer = wx.BoxSizer(wx.HORIZONTAL)
         for chooseRPSDateItem in self.buildRPSDateData():
             self.buildOneRPSDate(hSizer, chooseRPSDateItem)
         hSizer.AddSpacer(4)
         self.buildOneRPSRange(hSizer, list(self.buildRPSDaysData()))
+        self.rpsTextLabelFields["scRPS_Day"].SetRange(1,1000)
         return hSizer
 
     def buildRPSDaysData(self):
@@ -527,7 +532,7 @@ class RPSLeftPanel(wx.Panel):
 
     def EvtRPSDatePick(self,event):
         name = event.GetEventObject().GetName()
-        para = event.GetEventObject().GetValue().Format('%Y-%m-%d')
+        para = event.GetEventObject().GetValue().Format("%Y%m%d")
         pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
     
     def EvtRPSn(self,event):
@@ -553,7 +558,7 @@ class RPSLeftPanel(wx.Panel):
     def EvtRetNameDatetime(self):
         "datepick"
         name = event.GetEventObject().GetName()
-        para = event.GetEventObject().GetValue().Format('%Y-%m-%d')
+        para = event.GetEventObject().GetValue().Format("%Y%m%d")
         pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
         
     def EvtRangeSetting(self,event):
@@ -730,8 +735,8 @@ class RPSRightUpPanel(wx.Panel):
 #                dateIdx=i
 #            i+=1
         name = "RPSGridTableLeftDClick"
-        codeIdx = list((self.data).columns).index('code')
-        print("codeIdx = %d"%codeIdx)
+        codeIdx = list((self.data).columns).index('ts_code')
+        logger.debug("codeIdx = %d", codeIdx)
         para = self.data.iloc[event.Row, codeIdx]
         pub.sendMessage("pubMsg_RPSRightUpPanel", msg=(name, para))
 #        self.SetSizer(self.sizer)
@@ -1193,7 +1198,7 @@ class RPSRightDownPanel(wx.Panel):
 
 
     def date_to_num(self, date):
-        date_time = datetime.strptime(date.split(' ')[0],'%Y-%m-%d')
+        date_time = datetime.strptime(date.split(' ')[0],"%Y%m%d")
         num_date = date2num(date_time)
         return num_date
     
@@ -1212,14 +1217,20 @@ class RPSRightDownPanel(wx.Panel):
         
 #        df['date'] = df.loc[:,'date'].apply(self.date_to_num)  #Display blank in non-trade day
         
-        df['date'] = df.loc[:,'date'].apply(lambda x: datetime.strptime(x.split(' ')[0],'%Y-%m-%d'))  #Display blank in non-trade day
+        df['trade_date'] = df.loc[:,'trade_date'].apply(lambda x: datetime.strptime(x.split(' ')[0],"%Y%m%d"))  #Display blank in non-trade day
         def format_date(x,pos=None):
             #保证下标不越界,很重要,越界会导致最终plot坐标轴label无显示
             thisind = np.clip(int(x+0.5), 0, len(df)-1)
-            return df.date[thisind].strftime('%Y-%m-%d')
+            return df.trade_date[thisind].strftime("%Y%m%d")
         
+        # caculate weighted high, open, low
+        df['w_open'] = (df['weighted_close']*(1+(df['open']-df['close'])/df['close'])).round(2)
+        df['w_high'] = (df['weighted_close']*(1+(df['high']-df['close'])/df['close'])).round(2)
+        df['w_low'] = (df['weighted_close']*(1+(df['low']-df['close'])/df['close'])).round(2)
+        
+
         #         日期,   开盘,     收盘,    最高,      最低,   成交量,    代码
-        mat_df=df[['date_idx','open','close','high','low','volume','code']].values
+        mat_df=df[['date_idx','w_open','weighted_close','w_high','w_low','vol','ts_code']].values
 
         self.ax1.cla()
         
@@ -1233,7 +1244,7 @@ class RPSRightDownPanel(wx.Panel):
     def displayOneRPSbyCode(self, df, rps_nms):
         
 #        df =df_raw.copy()
-        #df['date'] = df.loc[:,'date'].apply(lambda x: datetime.strptime(x.split(' ')[0],'%Y-%m-%d'))  #Display blank in non-trade day
+        #df['date'] = df.loc[:,'date'].apply(lambda x: datetime.strptime(x.split(' ')[0],"%Y%m%d"))  #Display blank in non-trade day
         if (isinstance(rps_nms, str)):
             rps_nm = rps_nms
         # generate idx of columns, why only idx is working, ['code'] is not working.
@@ -1249,13 +1260,14 @@ class RPSRightDownPanel(wx.Panel):
         x = df.date_idx
         for idx in rpsIdxes:
             y = df.iloc[:,idx]
-            self.ax2.plot(x,y,'-', label=list(df.columns)[idx]+':'+df.loc[0,'code'])  
+            self.ax2.plot(x,y,'-', label=list(df.columns)[idx]+':'+df.loc[0,'ts_code'])  
 
         handles, labels = self.ax2.get_legend_handles_labels()
-        self.ax2.legend(handles[::-1], labels[::-1], loc='lower left')
+        #self.ax2.legend(handles[::-1], labels[::-1], loc='lower left')
+        self.ax2.legend(handles[::-1], labels[::-1], loc='best')
         #self.ax2.set_title("RPS Lines for Stock")
         self.ax2.grid(True)
-#        self.ax2.xaxis.set_major_formatter(mdate.DateFormatter('%Y-%m-%d'))
+#        self.ax2.xaxis.set_major_formatter(mdate.DateFormatter("%Y%m%d"))
 #        self.ax2.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
 
         #self.Figure.align_xlabels(self.ax1)
@@ -1263,81 +1275,81 @@ class RPSRightDownPanel(wx.Panel):
         #self.FigureCanvas.draw()#一定要实时更新  
 
 
-    def displayCandleStick_BACKUP(self,df):
-        #display last 200 days
-#        daysRequested = 20
-#        df=df_raw.iloc[-daysRequested:,:].copy()
-#        df=df_raw.iloc[-daysRequested:,:]
+#    def displayCandleStick_BACKUP(self,df):
+#        #display last 200 days
+##        daysRequested = 20
+##        df=df_raw.iloc[-daysRequested:,:].copy()
+##        df=df_raw.iloc[-daysRequested:,:]
 
-#        self.date_tickers=df.date.values
-#        weekday_quotes=[tuple([i]+list(quote[1:])) for i,quote in enumerate(data.values)]
-#        print (weekday_quotes)
-#        self.ax1.xaxis.set_major_locator(ticker.MultipleLocator(6))
-#        self.ax1.xaxis.set_major_formatter(ticker.FuncFormatter(self.format_date))
+##        self.date_tickers=df.date.values
+##        weekday_quotes=[tuple([i]+list(quote[1:])) for i,quote in enumerate(data.values)]
+##        print (weekday_quotes)
+##        self.ax1.xaxis.set_major_locator(ticker.MultipleLocator(6))
+##        self.ax1.xaxis.set_major_formatter(ticker.FuncFormatter(self.format_date))
         
-#        df['date'] = df.loc[:,'date'].apply(self.date_to_num)  #Display blank in non-trade day
-        df['date'] = range(0, len(df))  #Replace date with [0,1,2...], won't display blank in non-trade day
-        df=df[['date','open','close','high','low','volume','code']]
-        mat_df = df.values
-        # 生成横轴的刻度名字
+##        df['date'] = df.loc[:,'date'].apply(self.date_to_num)  #Display blank in non-trade day
+#        df['date'] = range(0, len(df))  #Replace date with [0,1,2...], won't display blank in non-trade day
+#        df=df[['date','open','close','high','low','volume','ts_code']]
+#        mat_df = df.values
+#        # 生成横轴的刻度名字
         
-        #         日期,   开盘,     收盘,    最高,      最低,   成交量,    代码
-        self.ax1.cla()
+#        #         日期,   开盘,     收盘,    最高,      最低,   成交量,    代码
+#        self.ax1.cla()
         
-        mpf.candlestick_ochl(self.ax1, mat_df, width=0.6, colorup='r', colordown='g', alpha=1.0)
-        #mpf.candlestick_ochl(self.ax2, mat_df, width=0.6, colorup='g', colordown='r', alpha=1.0)
-        self.ax1.grid(True)
-        self.FigureCanvas.draw()#一定要实时更新  
+#        mpf.candlestick_ochl(self.ax1, mat_df, width=0.6, colorup='r', colordown='g', alpha=1.0)
+#        #mpf.candlestick_ochl(self.ax2, mat_df, width=0.6, colorup='g', colordown='r', alpha=1.0)
+#        self.ax1.grid(True)
+#        self.FigureCanvas.draw()#一定要实时更新  
 
         
-    def displayOneRPSbyCode_BACKUP(self, df, rps_nms):
-        import matplotlib.dates as mdate
-        import matplotlib.ticker as ticker
+#    def displayOneRPSbyCode_BACKUP(self, df, rps_nms):
+#        import matplotlib.dates as mdate
+#        import matplotlib.ticker as ticker
         
-#        def format_date(x,pos=None):
-#            if x<0 or x>len(date_tickers)-1:
-#                return ''
-#            return date_tickers[int(x)]
-#        date_tickers =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y-%m-%d", errors = 'coerce')
-#        print(date_tickers)
+##        def format_date(x,pos=None):
+##            if x<0 or x>len(date_tickers)-1:
+##                return ''
+##            return date_tickers[int(x)]
+##        date_tickers =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y%m%d", errors = 'coerce')
+##        print(date_tickers)
 
-        #date_tickers=df.date.values
-#        x =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y-%m-%d", errors = 'coerce')
-#        x =  pd.to_datetime(df.iloc[:,0],infer_datetime_format=True)
-#        x = list(range(0, len(df)))        
-#        x = df.date.values
-        #把date string转换成datetime
-#        
+#        #date_tickers=df.date.values
+##        x =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y%m%d", errors = 'coerce')
+##        x =  pd.to_datetime(df.iloc[:,0],infer_datetime_format=True)
+##        x = list(range(0, len(df)))        
+##        x = df.date.values
+#        #把date string转换成datetime
+##        
 
-        if (isinstance(rps_nms, str)):
-            rps_nm = rps_nms
-        rpsIdxes = []
-        for col in rps_nms:
-            rpsIdxes.append(list(df.columns).index(col))
-        #rpsIdxes = list(df.columns).index(rps_nm)
-        #Remove dup value in rpsIdxes
-        rpsIdxes = list(set(rpsIdxes))
-#        y = df.iloc[:,rpsIdxes]
-        if (not self.displayMultiples):
-            self.ax2.cla()
-#        self.axes.plot(x,y,'-', label=df.loc[0,'code'])  
-        dateIdx = list(df.columns).index('date')
-        x =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y-%m-%d", errors = 'coerce')
-        for idx in rpsIdxes:
-            y = df.iloc[:,idx]
-            self.ax2.plot(x,y,'*', label=list(df.columns)[idx]+':'+df.loc[0,'code'])  
+#        if (isinstance(rps_nms, str)):
+#            rps_nm = rps_nms
+#        rpsIdxes = []
+#        for col in rps_nms:
+#            rpsIdxes.append(list(df.columns).index(col))
+#        #rpsIdxes = list(df.columns).index(rps_nm)
+#        #Remove dup value in rpsIdxes
+#        rpsIdxes = list(set(rpsIdxes))
+##        y = df.iloc[:,rpsIdxes]
+#        if (not self.displayMultiples):
+#            self.ax2.cla()
+##        self.axes.plot(x,y,'-', label=df.loc[0,'code'])  
+#        dateIdx = list(df.columns).index('date')
+#        x =  pd.to_datetime(df.iloc[:,dateIdx], format = "%Y%m%d", errors = 'coerce')
+#        for idx in rpsIdxes:
+#            y = df.iloc[:,idx]
+#            self.ax2.plot(x,y,'*', label=list(df.columns)[idx]+':'+df.loc[0,'ts_code'])  
 
-        handles, labels = self.ax2.get_legend_handles_labels()
-        self.ax2.legend(handles[::-1], labels[::-1], loc='lower left')
-        #self.ax2.xaxis.set_major_locator(ticker.MultipleLocator(6))        
-        #self.ax2.set_title("RPS Lines for Stock")
-#        self.axes.plot(df,'--b*')  
-        self.ax2.grid(True)
-        self.ax2.xaxis.set_major_formatter(mdate.DateFormatter('%Y-%m-%d'))
-#        self.ax2.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
+#        handles, labels = self.ax2.get_legend_handles_labels()
+#        self.ax2.legend(handles[::-1], labels[::-1], loc='lower left')
+#        #self.ax2.xaxis.set_major_locator(ticker.MultipleLocator(6))        
+#        #self.ax2.set_title("RPS Lines for Stock")
+##        self.axes.plot(df,'--b*')  
+#        self.ax2.grid(True)
+#        self.ax2.xaxis.set_major_formatter(mdate.DateFormatter("%Y%m%d"))
+##        self.ax2.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
 
-        self.Figure.align_xlabels(self.ax1)
-        self.FigureCanvas.draw()#一定要实时更新      
+#        self.Figure.align_xlabels(self.ax1)
+#        self.FigureCanvas.draw()#一定要实时更新      
     
     #按钮事件,用于测试绘图  
     def Button1Event(self,event):  
@@ -1419,7 +1431,7 @@ class RightDownPanel(wx.Panel):
     def date_to_num(self, dates):
         num_time = []
         for date in dates:
-            date_time = datetime.strptime(date,'%Y-%m-%d')
+            date_time = datetime.strptime(date,"%Y%m%d")
             num_date = date2num(date_time)
             num_time.append(num_date)
         return num_time
@@ -1592,7 +1604,7 @@ class Viewer(wx.Frame):
         nb.AddPage(self.page2, "数据更新")
         nb.AddPage(self.page3, "RPS")
         # Choose Page 2
-        nb.SetSelection(1)
+        nb.SetSelection(2)
         # finally, put the notebook in a sizer for the panel to manage
         # the layout
         self.SetBackgroundColour("white")
@@ -1764,6 +1776,7 @@ class Controller_RPS(object):
             if (msg[0]=="nmRpsInitCbx"):
                 self.view.setRPSbutton(msg[1])
             if (msg[0]=="nmRpsCbxPctRank"):
+                self.view.setRpsNwindow(msg[1])
                 self.view.setRpsEndDate(msg[1])
                 self.model.rpsCbxPctRankStatus=msg[1]
                 logger.debug("self.rpsCbxPctRankStatus =%s", str(self.model.rpsCbxPctRankStatus))
@@ -1835,12 +1848,12 @@ class Viewer_Base(object):
     def __init__(self):
         pass
     def setStartDate(self, date):
-        self.textPanelFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.textPanelFields["start date"].SetValue(datetime.strptime(date, "%Y%m%d"))
         self.setLoggerMsg(date)
     
     def setEndDate(self, date):
         #self.textPanelFields["end date"].SetValue(date)
-        self.textPanelFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.textPanelFields["end date"].SetValue(datetime.strptime(date, "%Y%m%d"))
         self.setLoggerMsg(date)
 
     def setWorkDays(self, days):
@@ -1943,7 +1956,7 @@ class Controller_dnldData(object):
         logger.debug("start date changed, = %s", self.model.start_date)
             
     def get_startdate_byworkday(self,end_date_str, numofdays):
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date_str, "%Y%m%d")
         if end_date.isoweekday() in [6,7]:
             preDate = end_date-timedelta(end_date.isoweekday()-5)
         else:
@@ -1956,14 +1969,14 @@ class Controller_dnldData(object):
                 preDate = preDate-timedelta(days=1)
         while(preDate.isoweekday() in [6,7]):
             preDate = preDate-timedelta(days=1)
-        return preDate.strftime("%Y-%m-%d")
+        return preDate.strftime("%Y%m%d")
 
 
 class DnldHQDataPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
         #self.start_date='2018-10-20'
-        #self.end_date=datetime.now().strftime("%Y-%m-%d")       #'2018-10-18'
+        #self.end_date=datetime.now().strftime("%Y%m%d")       #'2018-10-18'
         
         #self.autypeStr = 'nfq'         #不复权
         #self.days_num = ''
@@ -2040,12 +2053,12 @@ class DnldHQDataPanel(wx.Panel):
 
 ###### Viewer ######
     def setStartDate(self, date):
-        self.textPanelFields["start date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.textPanelFields["start date"].SetValue(datetime.strptime(date, "%Y%m%d"))
         self.setLoggerMsg(date)
     
     def setEndDate(self, date):
         #self.textPanelFields["end date"].SetValue(date)
-        self.textPanelFields["end date"].SetValue(datetime.strptime(date, "%Y-%m-%d"))
+        self.textPanelFields["end date"].SetValue(datetime.strptime(date, "%Y%m%d"))
         self.setLoggerMsg(date)
 
     def setWorkDays(self, days):
@@ -2104,7 +2117,8 @@ class DnldHQDataPanel(wx.Panel):
             text = wx.StaticText(panel, label=label)
             grid.Add(text, pos=(yPos, 0))
             textctrl = wx.TextCtrl(panel, value=value, size=size, name=label, style=wx.TE_PROCESS_ENTER)
-            self.Bind(wx.EVT_TEXT_ENTER, handler, textctrl)
+            #self.Bind(wx.EVT_TEXT_ENTER, handler, textctrl)
+            self.Bind(wx.EVT_TEXT, handler, textctrl)
             self.textPanelFields[label]=textctrl
 #            self.textCtrlHooks.append(textctrl)
             grid.Add(textctrl, (yPos, 1))
@@ -2177,7 +2191,7 @@ class DnldHQDataPanel(wx.Panel):
 
     
     def get_startdate_byworkday(self,end_date_str, numofdays):
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date_str, "%Y%m%d")
         if end_date.isoweekday() in [6,7]:
             preDate = end_date-timedelta(end_date.isoweekday()-5)
         else:
@@ -2190,7 +2204,7 @@ class DnldHQDataPanel(wx.Panel):
                 preDate = preDate-timedelta(days=1)
         while(preDate.isoweekday() in [6,7]):
             preDate = preDate-timedelta(days=1)
-        return preDate.strftime("%Y-%m-%d")
+        return preDate.strftime("%Y%m%d")
     
 #    def updateDisplay(self, msg):
         
@@ -2236,16 +2250,16 @@ class DnldHQDataPanel(wx.Panel):
         self.logger.AppendText(" Click on object with Id %d\n" %event.GetId())
     def Evt_StartDate(self, event):
         name = event.GetEventObject().GetName()
-        para = event.GetEventObject().GetValue().Format('%Y-%m-%d')
+        para = event.GetEventObject().GetValue().Format("%Y%m%d")
         pub.sendMessage("pubMsg_DnldHQdataPanel", msg=(name, para))
         #self.start_date = event.GetString()
         #self.logger.AppendText('Evt_StartDate: %s\n' % event.GetString())
         #print(1, event.GetString())
-        #print(2, event.GetEventObject().GetValue().Format('%Y-%m-%d'))
+        #print(2, event.GetEventObject().GetValue().Format("%Y%m%d"))
         
         #print(3, event.GetEventObject().GetName())
         #print(4, event.GetValue())
-        #print(5, event.GetValue().strftime("%Y-%m-%d"))
+        #print(5, event.GetValue().strftime("%Y%m%d"))
     def Evt_DaysNum(self, event):
         try:
             name = event.GetEventObject().GetName()

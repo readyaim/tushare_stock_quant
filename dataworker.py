@@ -93,7 +93,7 @@ class Sqlite3Handler(object):
         self.hq_codes = self.get_codes()
         self.tablenm_hqall='hqall_t'
         self.date_tail = '00:00:00.000000'
-        self.maxDateInDBStr = self.getMaxDateInDB()
+        
         
 
     def set_DBname_and_autype(self, autypeStr):
@@ -119,7 +119,7 @@ class Sqlite3Handler(object):
     def get_codes(self,table_nm=None):
         codes = []
         if (table_nm==None):
-            #table_nm = datetime.now().strftime("%Y-%m-%d")
+            #table_nm = datetime.now().strftime("%Y%m%d")
             table_nm = "stock_basic_t"
         sqlcmd_get_codes = "SELECT ts_code FROM '%s'"%table_nm
         try: 
@@ -161,31 +161,14 @@ class Sqlite3Handler(object):
                 logger.error('fail to generate codes_table.csv, try again')
                 assert (1==0)
     
-    def getMaxDateInDB(self):
-        cmd = "SELECT MAX(%s) FROM %s WHERE code='%s'"%("date", self.tablenm_hqall, "600703")
-        try:
-            dateStr = self.engine.execute(cmd).fetchone()[0].split(" ")[0]
-            logger.info("maxinum date in database is %s", dateStr)
-        except Exception as e:
-            logger.error("Error to read max Date in getRPSbyDate!\n, %s",e)
-            return None
-        return dateStr
-        
-    def getClippedMaxDate(self, dateStr):
-        """Return the clipped (smaller) Max Date between(date in database, dateStr)
-        """
-        maxDateInDB = datetime.strptime(self.maxDateInDBStr, "%Y-%m-%d")
-        if (maxDateInDB<datetime.strptime(dateStr, "%Y-%m-%d")):
-            return self.maxDateInDBStr
-        else:
-            return dateStr
+
 class CalcRPS_Model(Sqlite3Handler):
     
     def __init__(self):
 
-        self.rpsStartDate = datetime.now().strftime("%Y-%m-%d")
-        #self.rpsStartDate = '2018-10-22'
-        self.rpsEndDate = datetime.now().strftime("%Y-%m-%d")
+        self.rpsStartDate = datetime.now().strftime("%Y%m%d")
+        #self.rpsStartDate = '20181022'
+        self.rpsEndDate = datetime.now().strftime("%Y%m%d")
         self.rpsNChoices=['50','120', '250']
 #        self.rpsMktChoices = [u'全部', u'深市', u'沪市', u'创业板' ]
 #        self.rpsRangeChoices = [u'全部', u'一年以上']
@@ -199,10 +182,30 @@ class CalcRPS_Model(Sqlite3Handler):
         
         self.onoff=1
         self.rpsCbxPctRankStatus = False
-        self.pctRank_startdate = datetime.now().strftime("%Y-%m-%d")
-        self.rps_enddate = datetime.now().strftime("%Y-%m-%d")
+        self.pctRank_startdate = datetime.now().strftime("%Y%m%d")
+        self.rps_enddate = datetime.now().strftime("%Y%m%d")
         #self.autype='qfq'
-        super(CalcRPS_Model, self).__init__("qfq")
+        super(CalcRPS_Model, self).__init__("hfq")
+        self.maxDateInDBStr = self.getMaxDateInDB()
+
+    def getMaxDateInDB(self):
+        cmd = "SELECT MAX(%s) FROM %s WHERE ts_code='%s'"%("trade_date", self.tablenm_hqall, "000001.SZ")
+        try:
+            dateStr = self.engine.execute(cmd).fetchone()[0].split(" ")[0]
+            logger.info("maxinum date in database is %s", dateStr)
+        except Exception as e:
+            logger.error("Error to read max Date in getRPSbyDate!\n, %s",e)
+            return None
+        return dateStr
+        
+    def getClippedMaxDate(self, dateStr):
+        """Return the clipped (smaller) Max Date between(date in database, dateStr)
+        """
+        maxDateInDB = datetime.strptime(self.maxDateInDBStr, "%Y%m%d")
+        if (maxDateInDB<datetime.strptime(dateStr, "%Y%m%d")):
+            return self.maxDateInDBStr
+        else:
+            return dateStr
 
     def createColumnIfnotExist(self):
         self.rpsN='20'  #for debug only
@@ -223,7 +226,7 @@ class CalcRPS_Model(Sqlite3Handler):
     
     def saveSelectedCodesToFavorite(self, selectedCodes):
         filename = "favorite.csv"
-        mytime = datetime.now().strftime("%Y-%m-%d")
+        mytime = datetime.now().strftime("%Y%m%d")
         try:
             with open (filename, 'a+') as fw:
                 fw.write(mytime+':')
@@ -236,30 +239,32 @@ class CalcRPS_Model(Sqlite3Handler):
             rlt = False
         pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_saveSelectedCodesToFavorite", rlt))
     
-    def getRPSbyCode(self, code):
-        print("run getRPSbyCode: %s"%code)
+    def getRPSbyCode(self, tscode):
+        print("run getRPSbyCode: %s"%tscode)
         pct_nm = 'pct%s'%self.rpsN
         rps_nm = 'rps%s'%self.rpsN
         rpsN = int(self.rpsN)
 #        self.rpsStartDate='2018-10-22'
 #        self.targe_date = self.rpsStartDate+' '+self.date_tail
-        params = (code,)
-        cmd="SELECT * FROM %s WHERE code = ? "%self.tablenm_hqall
+        params = (tscode,)
+        cmd="SELECT * FROM %s WHERE ts_code = ? "%self.tablenm_hqall
         try:
             df=pd.read_sql_query(cmd, self.engine, params= params)
             
         except Exception as e:
-            logger.error("read rps data by code from %s error", self.tablenm_hqall)
+            logger.error("read rps data by ts_code from %s error", self.tablenm_hqall)
             logger.error(e)
             pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
             return
         if (len(df)!=0):
-            df_sorted = df.sort_values(by='date', ascending=True)
+            df_sorted = df.sort_values(by='trade_date', ascending=True)
             #只截取self.rpsDayCount天
             df_sorted=df_sorted.iloc[-int(self.rpsDayCount):,:]
+            # Start, sorted and add idx to DF to draw k-line without blank day
             df_sorted.index = range(0, len(df_sorted))
             df_sorted['date_idx'] = np.arange(len(df_sorted))
-            logger.debug('read rps data by code from base to dataframe success! len = %d', len(df))
+            # end
+            logger.debug('read rps data by ts_code from base to dataframe success! len = %d', len(df))
             self.rpsNList = list(set(self.rpsNList))
             self.rpsNList.append(rps_nm)
             pub.sendMessage("pubMsg_CalcRPS_Model", msg=("end_getRPSbyCode", (df_sorted, self.rpsNList)))
@@ -288,25 +293,28 @@ class CalcRPS_Model(Sqlite3Handler):
         rpsLow = int(self.rpsLow)
         rpsHigh = int(self.rpsHigh)
         if (rpsHigh>=rpsLow):
-    #        self.rpsStartDate='2018-10-22'
+    #        self.rpsStartDate='20181022'
             if (self.rpsCbxPctRankStatus == True):
+                # 阶段涨幅, 需要load数据重新计算rps
                 pct_nm = '_pct'
                 rps_nm = '_rps'
                 # for RPS Percentage Rank with 2 days
-                startdate_fullStr = self.rpsStartDate+' '+self.date_tail
-                enddate_fullStr = self.rpsEndDate+' '+self.date_tail
+                startdate_fullStr = self.rpsStartDate
+                enddate_fullStr = self.rpsEndDate
                 params = (startdate_fullStr,enddate_fullStr)
-                #cmd="SELECT * FROM %s WHERE date = '%s' or date = '%s'"%(self.tablenm_hqall, startdate_fullStr, enddate_fullStr)
-                cmd="SELECT * FROM %s WHERE date = ? or date = ? "%self.tablenm_hqall
+                #cmd="SELECT * FROM %s WHERE trade_date = '%s' or trade_date = '%s'"%(self.tablenm_hqall, startdate_fullStr, enddate_fullStr)
+                cmd="SELECT * FROM %s WHERE trade_date = ? or trade_date = ? "%self.tablenm_hqall
             else:
+                # 常规RPS50, 120, 250
                 # for rps50, rps120, rps250
                 pct_nm = 'pct%s'%self.rpsN
                 rps_nm = 'rps%s'%self.rpsN
                 rpsN = int(self.rpsN)
-                self.targe_date = self.getClippedMaxDate(self.rpsStartDate)+' '+self.date_tail
-                #cmd1="SELECT * FROM %s WHERE date = '%s'"%(self.tablenm_hqall, self.targe_date)
+                #self.targe_date = self.getClippedMaxDate(self.rpsStartDate)
+                self.targe_date = self.getClippedMaxDate(self.rpsStartDate)
+                #cmd1="SELECT * FROM %s WHERE trade_date = '%s'"%(self.tablenm_hqall, self.targe_date)
                 params = (self.targe_date,)
-                cmd  = "SELECT * FROM %s WHERE date = ? "%self.tablenm_hqall
+                cmd  = "SELECT * FROM %s WHERE trade_date = ? "%self.tablenm_hqall
             try:
                 df=pd.read_sql_query(cmd, self.engine, params=params)
                 pub.sendMessage("pubMsg_CalcRPS_Model", msg=("nmRpsGauage", 30))
@@ -319,15 +327,15 @@ class CalcRPS_Model(Sqlite3Handler):
                 logger.debug('read data from sqlite3 database to dataframe success! len = %d', len(df))    
                 if (self.rpsCbxPctRankStatus == True):
                 # Caculation _rps for requested (day1, day2)
-                    if (startdate_fullStr in df.date.values and enddate_fullStr in df.date.values):
-                        df.groupby('code').apply(lambda x: x.sort_values(by='date', ascending=False))
-                        df[pct_nm]= (df.groupby('code')['close'].apply(lambda x: x.pct_change(-1))).round(4)
-                        df[rps_nm] = (df.groupby('date')[pct_nm].apply(lambda x: x.rank(pct=True))*100).round(1)
-                        df = df[df['date']==self.rpsStartDate+' '+self.date_tail]
+                    if (startdate_fullStr in df.trade_date.values and enddate_fullStr in df.trade_date.values):
+                        df.groupby('ts_code').apply(lambda x: x.sort_values(by='trade_date', ascending=False))
+                        df[pct_nm]= (df.groupby('ts_code')['weighted_close'].apply(lambda x: x.pct_change(-1))).round(4)
+                        df[rps_nm] = (df.groupby('trade_date')[pct_nm].apply(lambda x: x.rank(pct=True))*100).round(1)
+                        df = df[df['trade_date']==self.rpsStartDate]
                         pub.sendMessage("pubMsg_CalcRPS_Model", msg=("nmRpsGauage", 60))
                     else:
                         # no data for requested dates. Invalid dates!
-                        logger.debug("No data found for requested date (%s, %s)", self.rpsStartDate, self.rpsEndDate)
+                        logger.debug("No data found for requested trade_date (%s, %s)", self.rpsStartDate, self.rpsEndDate)
                         pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
                         return
                 # Pick rps between (rpsLow, rpsHigh)    
@@ -348,63 +356,63 @@ class CalcRPS_Model(Sqlite3Handler):
         
     
     
-    def caculateOneCodeRPS(self, code="603999"):
-        logger.debug("run caculateOneCodeRPS()")
-        #self.createColumnIfnotExist()
-        para_getData = (self.tablenm_hqall, code)
-        cmd="SELECT * FROM %s WHERE code='%s'"%para_getData
-        print(cmd)
-#        df=pd.read_sql_query(cmd, self.engine, params=para_getData)
-        df=pd.read_sql_query(cmd, self.engine)
-        #print(df)
-        diff_nm = 'diff%s'%self.rpsN
-        pct_nm = 'pct%s'%self.rpsN
-        rps_nm = 'rps%s'%self.rpsN
-        #print(diff_nm, pct_nm, rps_nm)
-        df[diff_nm]=df['close'].diff(-int(self.rpsN))
-        df[pct_nm]=(df[diff_nm]/(df['close']+df[diff_nm])).round(4)
-        df[rps_nm]=df[pct_nm].rank(method="first")
-        # rate, code, date
-        c = df.apply(lambda x:(x[pct_nm],x['code'],x['date']), axis=1)
-        #c = df.apply(lambda x:(x[pct_nm],x[rps_nm],x['code'],x['date']), axis=1)
+#    def caculateOneCodeRPS(self, code="603999"):
+#        logger.debug("run caculateOneCodeRPS()")
+#        #self.createColumnIfnotExist()
+#        para_getData = (self.tablenm_hqall, code)
+#        cmd="SELECT * FROM %s WHERE code='%s'"%para_getData
+#        print(cmd)
+##        df=pd.read_sql_query(cmd, self.engine, params=para_getData)
+#        df=pd.read_sql_query(cmd, self.engine)
+#        #print(df)
+#        diff_nm = 'diff%s'%self.rpsN
+#        pct_nm = 'pct%s'%self.rpsN
+#        rps_nm = 'rps%s'%self.rpsN
+#        #print(diff_nm, pct_nm, rps_nm)
+#        df[diff_nm]=df['close'].diff(-int(self.rpsN))
+#        df[pct_nm]=(df[diff_nm]/(df['close']+df[diff_nm])).round(4)
+#        df[rps_nm]=df[pct_nm].rank(method="first")
+#        # rate, code, date
+#        c = df.apply(lambda x:(x[pct_nm],x['code'],x['date']), axis=1)
+#        #c = df.apply(lambda x:(x[pct_nm],x[rps_nm],x['code'],x['date']), axis=1)
         
-        para=tuple(c)
-        #print(para)
-        cmd = "UPDATE hqall_t SET %s = ? WHERE code = ? AND date = ?"%(pct_nm)
-        #cmd = "UPDATE hqall_t SET %s = ? %s = ?WHERE code = ? AND date = ?"%(pct_nm, rps_nm)
-        a = self.engine.execute(cmd, para)
-        logger.debug("end of %s",__class__)
+#        para=tuple(c)
+#        #print(para)
+#        cmd = "UPDATE hqall_t SET %s = ? WHERE code = ? AND date = ?"%(pct_nm)
+#        #cmd = "UPDATE hqall_t SET %s = ? %s = ?WHERE code = ? AND date = ?"%(pct_nm, rps_nm)
+#        a = self.engine.execute(cmd, para)
+#        logger.debug("end of %s",__class__)
           
-    def calcAllRPS_old(self):
-        i=0
-        preStopMarker=200
-        memInfo = psutil.virtual_memory()
-        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
-        start = time.time()
-        self.createColumnIfnotExist()
-        for code in self.hq_codes:
+#    def calcAllRPS_old(self):
+#        i=0
+#        preStopMarker=200
+#        memInfo = psutil.virtual_memory()
+#        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#        start = time.time()
+#        self.createColumnIfnotExist()
+#        for code in self.hq_codes:
             
-            if (self.onoff==1):
-                if (i>=preStopMarker):
-                    try:
-                        self.caculateOneCodeRPS(code)
-                    except Exception as e:
-                        logger.debug(e)
-            else:
-                break
-            i+=1
-            if (i>=preStopMarker):
-                #gc.collect()
-                logger.info("memory usage: %s", format(psutil.Process(os.getpid()).memory_info().rss,','))
-                logger.info("total: %s, usage: %f%%, cpu: %d", format(memInfo.total,','), memInfo.percent, psutil.cpu_count())
-                logger.debug("i=%d",i)
-#            if (i>=10):
+#            if (self.onoff==1):
+#                if (i>=preStopMarker):
+#                    try:
+#                        self.caculateOneCodeRPS(code)
+#                    except Exception as e:
+#                        logger.debug(e)
+#            else:
 #                break
-        logger.debug("time: %.2fs, i = %d",(time.time()-start), i)
-        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
-        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
-                             format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
-        pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
+#            i+=1
+#            if (i>=preStopMarker):
+#                #gc.collect()
+#                logger.info("memory usage: %s", format(psutil.Process(os.getpid()).memory_info().rss,','))
+#                logger.info("total: %s, usage: %f%%, cpu: %d", format(memInfo.total,','), memInfo.percent, psutil.cpu_count())
+#                logger.debug("i=%d",i)
+##            if (i>=10):
+##                break
+#        logger.debug("time: %.2fs, i = %d",(time.time()-start), i)
+#        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
+#                             format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
+#        pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
         
     def calcAllRPS(self):
         '''Read out all data from sql database, transfer, and generate 'pctN' and 'rpsN' two columns.
@@ -437,14 +445,14 @@ class CalcRPS_Model(Sqlite3Handler):
             logger.error(e)
             pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
             return
-        #df[pct_nm] = df.groupby('code')['close'].pct_change(20)   #not working, a bug for groupy pct_change. use below apply
+        #df[pct_nm] = df.groupby('code')['weighted_close'].pct_change(20)   #not working, a bug for groupy pct_change. use below apply
         if (len(df)==0):
             logger.debug('Error, database read error, len = %d', len(df))
             pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
         else:    
             logger.debug('read data from base to dataframe success! len = %d', len(df))
             try:
-                df.groupby('code').apply(lambda x: x.sort_values(by='date', ascending=False))
+                df = df.groupby('ts_code').apply(lambda x: x.sort_values(by='trade_date', ascending=False))
                 for rpsNstr in self.rpsNChoices:
                     rps_nm = 'rps%s'%rpsNstr
                     pct_nm = 'pct%s'%rpsNstr
@@ -453,8 +461,8 @@ class CalcRPS_Model(Sqlite3Handler):
 #                    if rps_nm in list(df.columns):
 #                        logger.debug("%s existed in database, continue", rps_nm)
 #                        continue
-                    df[pct_nm]= (df.groupby('code')['close'].apply(lambda x: x.pct_change(-rpsN))).round(4)
-                    df[rps_nm] = (df.groupby('date')[pct_nm].apply(lambda x: x.rank(pct=True))*100).round(1)
+                    df[pct_nm]= (df.groupby('ts_code')['weighted_close'].apply(lambda x: x.pct_change(-rpsN))).round(4)
+                    df[rps_nm] = (df.groupby('trade_date')[pct_nm].apply(lambda x: x.rank(pct=True))*100).round(1)
                     counter += 15
                     pub.sendMessage("pubMsg_CalcRPS_Model", msg=("nmRpsGauage", counter))
                 logger.debug('caculation is done! Start saving...')
@@ -486,17 +494,20 @@ class CalcRPS_Model(Sqlite3Handler):
 class DnldHQDataModel(Sqlite3Handler):
     def __init__(self):
         
-        self.start_date='2018-08-6'
-        #self.end_date = '2018-08-13'
-        self.end_date = datetime.now().strftime("%Y-%m-%d")
-        self.current_date = datetime.now().strftime("%Y-%m-%d")
+        self.start_date='2018086'
+        #self.end_date = '20180813'
+        if (datetime.now().hour>16):
+            self.end_date = datetime.now().strftime("%Y%m%d")
+        else:
+            self.end_date = (datetime.now()-timedelta(days=1)).strftime("%Y%m%d")
+        self.current_date = datetime.now().strftime("%Y%m%d")
         self.days_num=''
         self.HQonoff=0      #default off
 #        self.engine = create_engine('sqlite+pysqlite:///%s'%self.sql_filename, module=sqlite)
         #self.engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite)
 #        self.engine = create_engine('sqlite+pysqlite:///file.db', module=sqlite)
         name = __class__
-        super(DnldHQDataModel, self).__init__('nfq')
+        super(DnldHQDataModel, self).__init__('hfq')
 #        
 #        self.autypeStr = 'qfq'
 #        self.set_DBname_and_autype(self.autypeStr)
@@ -528,7 +539,7 @@ class DnldHQDataModel(Sqlite3Handler):
     
     def checkDateTableExist(self,date=None):
         if (date==None):
-            date = datetime.now().strftime("%Y-%m-%d")
+            date = datetime.now().strftime("%Y%m%d")
         query = "select count(*)  from sqlite_master where type='table' and name = '%s'"%date
         logger.debug("query = %s", query)
         counter = list(self.engine.execute(query).fetchone())[0]
@@ -544,74 +555,74 @@ class DnldHQDataModel(Sqlite3Handler):
     def filter_date(self, startDateStr, endDateStr):
         """Return the list of modified date as [startdate as next workday, enddate as previous workday]
         """
-        startDate = datetime.strptime(startDateStr, "%Y-%m-%d")
-        endDate = datetime.strptime(endDateStr, "%Y-%m-%d")
+        startDate = datetime.strptime(startDateStr, "%Y%m%d")
+        endDate = datetime.strptime(endDateStr, "%Y%m%d")
         startDays = startDate.isoweekday()
         if (startDays in [6,7]):
-            newStartStr = (startDate+timedelta(days=(8-startDays))).strftime("%Y-%m-%d")
+            newStartStr = (startDate+timedelta(days=(8-startDays))).strftime("%Y%m%d")
         else:
             newStartStr=startDateStr
         # endDays        
         endDays = endDate.isoweekday()
         if (endDays in [6,7]):
-            newEndStr = (endDate+timedelta(days=(5-endDays))).strftime("%Y-%m-%d")
+            newEndStr = (endDate+timedelta(days=(5-endDays))).strftime("%Y%m%d")
         else:
             newEndStr=endDateStr
         logger.debug("filtered date: [%s, %s]",newStartStr, newEndStr)
         return [newStartStr, newEndStr]
 
-    def updateHQdata(self):
-#        pub.sendMessage("update", msg="disableMenu")
-        pub.sendMessage("pubMsg_DnldHQDataModel", msg="disableMenu")
-        #TODO: verify validation of start_date, end_date
-        i=0
-        target_span=self.filter_date(self.start_date, self.end_date)
-        for code in self.hq_codes:
-            i+=1
-  #          pub.sendMessage("update", msg=i)
-            pub.sendMessage("pubMsg_DnldHQDataModel", msg=i)
-            #logger.debug("gauge=%d",i)
-            dateSpans=self.get_dateSpans(code, target_span)
-            try:
-                logger.debug("get %s hq data, start", code)
-                print(dateSpans)
-                for span in dateSpans:
-                    if (self.HQonoff==1):
-                        #TODO: use threading.event()?
-                        if (self.autype == 'qfq'):
-                            df = ts.get_h_data(code, start=span[0], end=span[1], retry_count=3, pause=5)
-                        else:
-                            df = ts.get_h_data(code, start=span[0], end=span[1], autype=self.autype, retry_count=3, pause=5)
-#                        time.sleep(2)
-                        #add a columen code
-                        df['code']=code
-                        print(df)
-                        #df.to_sql("_%s"%code,self.engine, if_exists='append',index=True)
-                        df.to_sql("%s"%self.tablenm_hqall,self.engine, if_exists='append',index=True)
-                        logger.debug("write %s to DB",code)
-                    else:
-                        #(self.HQonoff==0):        #stop
-#                        pub.sendMessage("update", msg="endHQupdate")        #clear gauage counter
-                        pub.sendMessage("pubMsg_DnldHQDataModel", msg="endHQupdate")        #clear gauage counter
-                        logger.info("updateHQdata() is stopped by Stop Button pressed, setting HQonoff 0")
-                        return
-                #delete duplicate line
-                cmd_del = "delete from _%s where rowid not in(select max(rowid) from _%s group by date)"%(code,code)
-                #self.engine.execute(cmd_del)
-                #TODO: need to check, enable or disable below
-            except OSError as e:
-                #network issue
-                logger.info(e)
-                time.sleep(60)
-            except Exception as e:
-                logger.info(e)
+#    def updateHQdata(self):
+##        pub.sendMessage("update", msg="disableMenu")
+#        pub.sendMessage("pubMsg_DnldHQDataModel", msg="disableMenu")
+#        #TODO: verify validation of start_date, end_date
+#        i=0
+#        target_span=self.filter_date(self.start_date, self.end_date)
+#        for code in self.hq_codes:
+#            i+=1
+#  #          pub.sendMessage("update", msg=i)
+#            pub.sendMessage("pubMsg_DnldHQDataModel", msg=i)
+#            #logger.debug("gauge=%d",i)
+#            dateSpans=self.get_dateSpans(code, target_span)
+#            try:
+#                logger.debug("get %s hq data, start", code)
+#                print(dateSpans)
+#                for span in dateSpans:
+#                    if (self.HQonoff==1):
+#                        #TODO: use threading.event()?
+#                        if (self.autype == 'qfq'):
+#                            df = ts.get_h_data(code, start=span[0], end=span[1], retry_count=3, pause=5)
+#                        else:
+#                            df = ts.get_h_data(code, start=span[0], end=span[1], autype=self.autype, retry_count=3, pause=5)
+##                        time.sleep(2)
+#                        #add a columen code
+#                        df['code']=code
+#                        print(df)
+#                        #df.to_sql("_%s"%code,self.engine, if_exists='append',index=True)
+#                        df.to_sql("%s"%self.tablenm_hqall,self.engine, if_exists='append',index=True)
+#                        logger.debug("write %s to DB",code)
+#                    else:
+#                        #(self.HQonoff==0):        #stop
+##                        pub.sendMessage("update", msg="endHQupdate")        #clear gauage counter
+#                        pub.sendMessage("pubMsg_DnldHQDataModel", msg="endHQupdate")        #clear gauage counter
+#                        logger.info("updateHQdata() is stopped by Stop Button pressed, setting HQonoff 0")
+#                        return
+#                #delete duplicate line
+#                cmd_del = "delete from _%s where rowid not in(select max(rowid) from _%s group by date)"%(code,code)
+#                #self.engine.execute(cmd_del)
+#                #TODO: need to check, enable or disable below
+#            except OSError as e:
+#                #network issue
+#                logger.info(e)
+#                time.sleep(60)
+#            except Exception as e:
+#                logger.info(e)
             
-            if (i>=G_NUM_OF_CODES):
-#            if (i>=3):
-                logger.info("updateHQdata() is finished, i=%d",i)
-                break
- #       pub.sendMessage("update", msg="endHQupdate")            
-        pub.sendMessage("pubMsg_DnldHQDataModel", msg="endHQupdate")
+#            if (i>=G_NUM_OF_CODES):
+##            if (i>=3):
+#                logger.info("updateHQdata() is finished, i=%d",i)
+#                break
+# #       pub.sendMessage("update", msg="endHQupdate")            
+#        pub.sendMessage("pubMsg_DnldHQDataModel", msg="endHQupdate")
 
     def updateHQdataByDate(self):
         start = time.time()
@@ -627,21 +638,44 @@ class DnldHQDataModel(Sqlite3Handler):
         if (len(ts_dates)==0):
             gaugeStep = 100
         else:
-            gaugeStep = round(100/(len(ts_dates)))
+            gaugeStep = 100/(4*len(ts_dates))
         #print(ts_dates)
         for ts_date in ts_dates:
             gaugeCounter += gaugeStep
             #print(ts_date)
-            pub.sendMessage("pubMsg_DnldHQDataModel", msg=gaugeCounter)
+            pub.sendMessage("pubMsg_DnldHQDataModel", msg=round(gaugeCounter))
             #logger.debug("gaugeCounter = %d", gauageCounter)
             try:
                 #logger.debug("get %s hq data, start...")
                 if (self.HQonoff==1):
                     #TODO: use threading.event()?
-                    if (self.autype == 'qfq'):
+                    if (self.autype == '1234qfq'):
                         df = pro.daily(trade_date=ts_date)
                     else:
-                        df = pro.daily(trade_date=ts_date)
+                        #df = pro.daily(trade_date=ts_date)
+                        #某天换手率
+                        df1 = pro.daily_basic(ts_code='', trade_date=ts_date)
+                        #某天日线数据
+                        gaugeCounter += gaugeStep
+                        df2 = pro.daily(trade_date=ts_date)
+                        #某天复权因子
+                        gaugeCounter += gaugeStep
+                        df3 = pro.adj_factor(ts_code='', trade_date=ts_date)
+                        gaugeCounter += gaugeStep
+                        #df1.to_csv("df1.csv",index=false)
+                        #df2.to_csv("df2.csv",index=false)
+                        #df3.to_csv("df3.csv",index=false)
+                        # Drop duplicated 'close'
+                        df1.drop(['close'],axis=1, inplace=True)
+                        df4 = pd.merge(df2,df1,on=['ts_code','trade_date'])
+                        df = pd.merge(df4,df3,on=['ts_code','trade_date'])
+                        # calc backward weighted close
+                        df['weighted_close']=(df['close']*df['adj_factor']).round(2)
+                        ## caculate weighted high, open, low
+                        #df['w_open'] = (df['weighted_close']*(1+(df['open']-df['close'])/df['close'])).round(2)
+                        #df['w_high'] = (df['weighted_close']*(1+(df['high']-df['close'])/df['close'])).round(2)
+                        #df['w_low'] = (df['weighted_close']*(1+(df['low']-df['close'])/df['close'])).round(2)
+
                     df.to_sql("%s"%self.tablenm_hqall,self.engine, if_exists='append',index=False)
                     logger.debug("write %s to database",ts_date)
                 else:
@@ -681,68 +715,68 @@ class DnldHQDataModel(Sqlite3Handler):
         
         print(df)
     
-    def get_dateSpans(self, code=None, target_span=None):
-        dateSpans=[]
-        if (target_span==None):
-            start_date_menu = self.start_date
-            end_date_menu = self.end_date
-        else:
-            start_date_menu = target_span[0]
-            end_date_menu = target_span[1]
-        logger.debug("start_date_menu = %s, end_date_menu=%s",start_date_menu, end_date_menu)
-        try:
-            # get sqlite3 time in str
-#            cmd1 = "SELECT MIN(date) FROM _%s"%code                                                                    #1 code in 1 table
-            cmd1 = "SELECT MIN(date) FROM %s where code = %s"%(self.tablenm_hqall, code)            #all codes in 1 table
-            start_date_db= self.engine.execute(cmd1).fetchall()[0][0][:10]
-            #days-1
-            start_date_db = (datetime.strptime(start_date_db, "%Y-%m-%d")+timedelta(days=-1)).strftime("%Y-%m-%d")
+#    def get_dateSpans(self, code=None, target_span=None):
+#        dateSpans=[]
+#        if (target_span==None):
+#            start_date_menu = self.start_date
+#            end_date_menu = self.end_date
+#        else:
+#            start_date_menu = target_span[0]
+#            end_date_menu = target_span[1]
+#        logger.debug("start_date_menu = %s, end_date_menu=%s",start_date_menu, end_date_menu)
+#        try:
+#            # get sqlite3 time in str
+##            cmd1 = "SELECT MIN(date) FROM _%s"%code                                                                    #1 code in 1 table
+#            cmd1 = "SELECT MIN(date) FROM %s where code = %s"%(self.tablenm_hqall, code)            #all codes in 1 table
+#            start_date_db= self.engine.execute(cmd1).fetchall()[0][0][:10]
+#            #days-1
+#            start_date_db = (datetime.strptime(start_date_db, "%Y%m%d")+timedelta(days=-1)).strftime("%Y%m%d")
             
-#            cmd2 = "SELECT MAX(date) FROM _%s"%code
-            cmd2 = "SELECT MAX(date) FROM %s where code = %s"%(self.tablenm_hqall, code)            #all codes in 1 table
-            end_date_db= self.engine.execute(cmd2).fetchall()[0][0][:10]
-            end_date_db = (datetime.strptime(end_date_db, "%Y-%m-%d")+timedelta(days=1)).strftime("%Y-%m-%d")
-            #end_date_db = datetime.strptime(b, "%Y-%m-%d")
-            logger.debug("start_date_db = %s, end_date_db=%s",start_date_db, end_date_db)
+##            cmd2 = "SELECT MAX(date) FROM _%s"%code
+#            cmd2 = "SELECT MAX(date) FROM %s where code = %s"%(self.tablenm_hqall, code)            #all codes in 1 table
+#            end_date_db= self.engine.execute(cmd2).fetchall()[0][0][:10]
+#            end_date_db = (datetime.strptime(end_date_db, "%Y%m%d")+timedelta(days=1)).strftime("%Y%m%d")
+#            #end_date_db = datetime.strptime(b, "%Y%m%d")
+#            logger.debug("start_date_db = %s, end_date_db=%s",start_date_db, end_date_db)
             
-            if (end_date_menu<=start_date_db):
-                #status 1:
-                logger.debug("status 1")
-                dateSpans.append([start_date_menu,end_date_menu])
-            elif (start_date_menu>=end_date_db):
-                # status 2, same as 1
-                logger.debug("status 2")
-                dateSpans.append([start_date_menu, end_date_menu])
-            elif (start_date_menu<start_date_db)&(end_date_menu>start_date_db)&(end_date_menu<end_date_db):
-                #status 5
-                logger.debug("status 5")
-                dateSpans.append([start_date_menu,start_date_db] )
-            elif (start_date_db<=start_date_menu)&(start_date_menu<=end_date_db)&(end_date_db<=end_date_menu):
-                #status 6
-                logger.debug("status 6")
-                dateSpans.append([end_date_db, end_date_menu])
-            elif (start_date_db<=start_date_menu)&(end_date_menu<=end_date_db):
-                #status 8
-                logger.debug("status 8")
-                pass
-            elif (start_date_menu<=start_date_db)&(end_date_db<=end_date_menu):
-                #status 9
-                logger.debug("status 9")
-                dateSpans.append([start_date_menu, start_date_db])
-                dateSpans.append([end_date_db, end_date_menu])
-        except Exception as e:
-            #7. No data in dB
-            logger.debug("status 9")
-            dateSpans.append([start_date_menu, end_date_menu])
+#            if (end_date_menu<=start_date_db):
+#                #status 1:
+#                logger.debug("status 1")
+#                dateSpans.append([start_date_menu,end_date_menu])
+#            elif (start_date_menu>=end_date_db):
+#                # status 2, same as 1
+#                logger.debug("status 2")
+#                dateSpans.append([start_date_menu, end_date_menu])
+#            elif (start_date_menu<start_date_db)&(end_date_menu>start_date_db)&(end_date_menu<end_date_db):
+#                #status 5
+#                logger.debug("status 5")
+#                dateSpans.append([start_date_menu,start_date_db] )
+#            elif (start_date_db<=start_date_menu)&(start_date_menu<=end_date_db)&(end_date_db<=end_date_menu):
+#                #status 6
+#                logger.debug("status 6")
+#                dateSpans.append([end_date_db, end_date_menu])
+#            elif (start_date_db<=start_date_menu)&(end_date_menu<=end_date_db):
+#                #status 8
+#                logger.debug("status 8")
+#                pass
+#            elif (start_date_menu<=start_date_db)&(end_date_db<=end_date_menu):
+#                #status 9
+#                logger.debug("status 9")
+#                dateSpans.append([start_date_menu, start_date_db])
+#                dateSpans.append([end_date_db, end_date_menu])
+#        except Exception as e:
+#            #7. No data in dB
+#            logger.debug("status 9")
+#            dateSpans.append([start_date_menu, end_date_menu])
         
-        # remove the day of week end
-        filtered_dateSpans=[]
-        for dateSpan in dateSpans:
-            filteredSpan = self.filter_date(dateSpan[0], dateSpan[1])
-            if filteredSpan[0]<=filteredSpan[1]:
-                filtered_dateSpans.append(filteredSpan)
+#        # remove the day of week end
+#        filtered_dateSpans=[]
+#        for dateSpan in dateSpans:
+#            filteredSpan = self.filter_date(dateSpan[0], dateSpan[1])
+#            if filteredSpan[0]<=filteredSpan[1]:
+#                filtered_dateSpans.append(filteredSpan)
         
-        return filtered_dateSpans
+#        return filtered_dateSpans
             
     def getDateStrListToDnld(self, sDateStr, eDateStr):
         dateStrLists=[]
@@ -751,8 +785,10 @@ class DnldHQDataModel(Sqlite3Handler):
 #        dnldStartDate = '2018-08-05'
 #        dnldEndDate = '2018-08-15'
         logger.debug("dnldStartDate = %s, dnldEndDate = %s", dnldStartDate, dnldEndDate)
+        # get business day in list of dates index
         datesIndex = pd.bdate_range(dnldStartDate,dnldEndDate)
-        #logger.debug('datesIndex = %s ', datesIndex)
+        #length = len(datesIndex)
+        # format to string from date, in iteration type
         datesIter = map(lambda x: x.strftime("%Y%m%d"),datesIndex)
         try:
             # get sqlite3 time in str
@@ -762,15 +798,19 @@ class DnldHQDataModel(Sqlite3Handler):
         except Exception as e:
             #7. No data in dB
             logger.debug("getDateStrListToDnld read database error: %s",e)
+            # blank database
+            df=pd.DataFrame(columns=['trade_date'])
+        # get existed dates, in string list.
         storedDateStrList = list(df.trade_date.values)
         #logger.debug('storedDateStrList = %s ', storedDateStrList)
-        datesStr = filter(lambda x: x not in storedDateStrList, datesIter)
-        #logger.debug('filtered dateStr list is %s', list(datesStr))
-        return datesStr
+        # remove the dates that existed in database, in iteration
+        datesStrIter = filter(lambda x: x not in storedDateStrList, datesIter)
+        #logger.debug('filtered dateStr list is %s', list(datesStrIter))
+        return datesStrIter
     
     
     def getTodayAllData(self):
-        date = datetime.now().strftime("%Y-%m-%d")
+        date = datetime.now().strftime("%Y%m%d")
         filename = date+'.csv'
         repeat_counter = 0
         #if not os.path.exists(filename):
@@ -799,14 +839,14 @@ class DnldHQDataModel(Sqlite3Handler):
         
     def writeSqlite(self, df, table_nm=None):
         if (table_nm==None):
-            table_nm = datetime.now().strftime("%Y-%m-%d")
+            table_nm = datetime.now().strftime("%Y%m%d")
         df.to_sql(table_nm, self.engine)
         logger.info("success: write hq date at %s",table_nm)
         
 #    def get_codes(self,table_nm=None):
 #        codes = []
 #        if (table_nm==None):
-#            #table_nm = datetime.now().strftime("%Y-%m-%d")
+#            #table_nm = datetime.now().strftime("%Y%m%d")
 #            table_nm = "codes_t"
 #        sqlcmd_get_codes = "SELECT code FROM '%s'"%table_nm
 #        try: 
@@ -823,7 +863,7 @@ class DnldHQDataModel(Sqlite3Handler):
 #        #print(codes)
 #        return list(codes)
     def isWeekDay(self, str_time):
-        date = datetime.strptime(str_time, "%Y-%m-%d")
+        date = datetime.strptime(str_time, "%Y%m%d")
         return date.isoweekday()
     def generate_codes_csv(self, filename = 'codes_table.csv', maxcounter=5):
         assert(isinstance(filename, str))
@@ -876,7 +916,7 @@ class DnldHQDataModel(Sqlite3Handler):
 #                assert (1==0)
 #    
 #    def initCodeTable(self, flag='ifexist'):
-##        date = datetime.now().strftime("%Y-%m-%d")
+##        date = datetime.now().strftime("%Y%m%d")
 ##        code_df = pd.DataFrame(r.fetchall(), columns=['code'])
 #        cmd_get_codes = "SELECT code FROM codes_t"
 #        try:
@@ -915,7 +955,7 @@ class DnldHQDataModel(Sqlite3Handler):
 #            logger.error("codes_table.csv does not exist")
 #        
 #    def saveLatestCodes_tocsv(self):
-#        date = datetime.now().strftime("%Y-%m-%d")
+#        date = datetime.now().strftime("%Y%m%d")
 ##        date = '2018-10-17'
 #        sqlcmd_get_codes = "SELECT code FROM '%s'"%date
 #        try:
@@ -1067,7 +1107,7 @@ df.to_sql('hqall_t', engine, if_exists='replace',index=True)
 #排序 
 df.sort_values(by='code')
 #转换 date'
-df['date_parsed'] = pd.to_datetime(df['date'], format = "%Y-%m-%d", errors = 'coerce')
+df['date_parsed'] = pd.to_datetime(df['date'], format = "%Y%m%d", errors = 'coerce')
 data['date_parsed'] = pd.to_datetime(data['Date'],infer_datetime_format=True)
 
 #选择数据库日期最大值
@@ -1087,7 +1127,7 @@ df = pro.daily(trade_date='20180810')
 df = ts.pro_bar(pro_api=api, ts_code='000001.SZ', adj='qfq', start_date='20160101', end_date='20181111')
 
 #下载某天全部数据
- df = pro.daily(trade_date='20180810')
+ df1 = pro.daily(trade_date='20180726')
 
  #获取股票列表
  data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,fullname,enname, market, exchange, curr_type, list_status, list_date, delist_date, is_hs')
@@ -1096,5 +1136,21 @@ df = ts.pro_bar(pro_api=api, ts_code='000001.SZ', adj='qfq', start_date='2016010
  cmd = "SELECT trade_date FROM %s where ts_code = '%s'"%('hqall_t', '000001.SZ')            #all codes in 1 table
  df=pd.read_sql_query(cmd, engine)
 
+ #某天换手率
+ df1 = pro.daily_basic(ts_code='', trade_date='20180726')
+ #某天日线数据
+ df2 = pro.daily(trade_date='20180726')
+
+ #某天复权因子
+ df3 = pro.adj_factor(ts_code='', trade_date='20180726')
+
+ df1.to_csv("df1.csv",index=False)
+ df2.to_csv("df2.csv",index=False)
+ df3.to_csv("df3.csv",index=False)
+
+ df1.drop(['code'],axis=1, inplace=True)
+ df4 = pd.merge(df2,df1,on=['ts_code','trade_date'])
+ df5 = pd.merge(df4,df3,on=['ts_code','trade_date'])
+ df5['weighted_close']=(df5['close']*df5['adj_factor']).round(2)
 
 '''
