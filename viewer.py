@@ -7,7 +7,6 @@ add threading.event to 'stop' button
 
 
 import dataworker
-G_NUM_OF_CODES=3
 import sys
 import os
 import wx
@@ -195,6 +194,69 @@ class TestTable(wx.grid.GridTableBase):#定义网格表
 #        return attr
     def setData(self, data):
         self.data = data
+
+class CommonPanelMethod(object):
+    def __init__(self, widgetsInPanel, pubMsgStr):
+        """This is the parent class used for viewer, to set widgets in panel."""
+        self.widgetsInPanel = widgetsInPanel
+        self.pubMsgStr=pubMsgStr
+        pass
+    
+    def buildGauge(self, sizer):
+        # Gauge
+        name = "nmGauage"
+        gauge = wx.Gauge(self,-1, 100, size=(-1,2), name=name)       
+        self.Bind(wx.EVT_IDLE, self.EvtGauge, gauge)
+        self.widgetsInPanel[name] = gauge
+        gauge.SetValue(0)
+        sizer.Add(gauge, 0, wx.ALL|wx.EXPAND, 10)
+#        cvrgauge.Hide()      #Hide the gauage after self.SetSizer(mainSizer), to avoid abnormal display
+        return sizer
+    def EvtGauge(self):
+        pass
+    def EvtRetNameValue(self, event):
+        "nmCvrDays, nmCVRatioThreshold"
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue()
+        pub.sendMessage(self.pubMsgStr, msg=(name, para))
+    
+    def EvtRetNameString(self, event):
+        "comboBox, nmPreCondDir1, nmPreCondMAday, nmPreCondDir2"
+        name = event.GetEventObject().GetName()
+        para = event.GetString()
+        pub.sendMessage(self.pubMsgStr, msg=(name, para))
+        
+    def EvtRetNameDateStr(self, event):
+        "datepick, nmCvrStartDate, nmCvrEndDate"
+        name = event.GetEventObject().GetName()
+        para = event.GetEventObject().GetValue().Format("%Y%m%d")
+        pub.sendMessage(self.pubMsgStr, msg=(name, para))
+        
+    def setDatebyName(self, name, date):
+        "datepick, nmCvrStartDate, nmCvrEndDate"
+        self.widgetsInPanel[name].SetValue(datetime.strptime(date, "%Y%m%d"))
+        logger.debug("set %s = %s", name, date)
+
+    def setValueByName(self, name, value):
+        self.widgetsInPanel[name].SetValue(str(value))
+        logger.debug("set %s = %s", name, str(value))
+
+    def setGaugeShowHide(self, name, status):
+        if status ==True:
+            self.widgetsInPanel[name].Show()
+        else:
+            self.widgetsInPanel[name].Hide()
+    def setGaugeCounter(self, name, counter):
+        self.widgetsInPanel[name].SetValue(int(counter))
+    def setWorkDays(self, days):
+        pass
+        #self.textPanelFields["work days"].SetValue(days)
+        #self.setLoggerMsg(days)
+
+    def setAuType(self, autype):
+        pass
+        #self.auTyperbx.SetSelection(self.auTyperbx.FindString(autype))
+        #self.setLoggerMsg(autype)
 
 
 class PageOne(wx.Panel):
@@ -750,10 +812,10 @@ class RPSRightUpPanel(wx.Panel):
 #        print(self.data.iloc[event.Row, codeIdx])
 #        print(self.data.iloc[event.Row, dateIdx])
         
-class PageThree(wx.Panel):
+class RPSFrontPanel(wx.Panel):
 #    def __init__(self, parent):
 #        wx.Panel.__init__(self, parent)
-#        t = wx.StaticText(self, -1, "This is a PageThree object", (20,20), style=wx.ST_NO_AUTORESIZE)
+#        t = wx.StaticText(self, -1, "This is a RPSFrontPanel object", (20,20), style=wx.ST_NO_AUTORESIZE)
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
         mainsplitter = MultiSplitterWindow(self, style=wx.SP_LIVE_UPDATE)
@@ -772,16 +834,21 @@ class PageThree(wx.Panel):
         self.Fit()
         self.Show()
 
-
-class LeftPanel(wx.Panel):
+class CVRLeftPanel(wx.Panel, CommonPanelMethod):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
+        self.CVRpanelWidgets={}
+        CommonPanelMethod.__init__(self, self.CVRpanelWidgets, "pubMsg_CVRLeftPanel")
         self.choiceList = [u'偏离', u'低于', u'高于']
         self.pickList = [u'至多',u'至少']
         self.daysAveList = ['5', '20','30','60','120','240']
         mainsizer = wx.BoxSizer(wx.VERTICAL)
         #筛选条件
         sizer = self.buildChooseCondBar()
+        mainsizer.Add(sizer,0, wx.EXPAND)
+        mainsizer.AddSpacer(10)
+        #初筛条件
+        sizer = self.buildPreChooseCondBar()
         mainsizer.Add(sizer,0, wx.EXPAND)
         mainsizer.AddSpacer(10)
         #均价关系
@@ -797,9 +864,8 @@ class LeftPanel(wx.Panel):
         mainsizer.Add(staticsizer,0, wx.EXPAND)
         mainsizer.AddSpacer(10)
         #启动按钮
-        button = wx.Button(self, -1, label=u"开始量能筛选")
-        self.Bind(wx.EVT_BUTTON, self.Evt_Startup, button)
-        mainsizer.Add(button)
+        sizer = self.buildCvrStartBar()
+        mainsizer.Add(sizer)
         
         self.SetBackgroundColour("white")
         self.SetSizer(mainsizer)
@@ -807,73 +873,160 @@ class LeftPanel(wx.Panel):
         self.Fit()
         self.Show()
         self.SetDoubleBuffered(True)    #to avoid flickering of text
+        self.CVRpanelWidgets["nmGauage"].Hide()  #Hide CVR gauge
+        self.nmItems = ["MAdir","MAdays","DiffDir","DiffValue"]
 #        self.statusReadoutPanel.SetDoubleBuffered(True)
     
+    
+    def setPreCond(self, preCond, keyItem=None):
+        prefix = "nmPreCond"
+        if keyItem==None:
+            for key in preCond:
+                self.CVRpanelWidgets[prefix+key].SetValue(preCond[key])
+        else:
+            self.CVRpanelWidgets[prefix+keyItem].SetValue(preCond[keyItem])
+        logger.debug("initiate the PreCond Bar value from self.preCond in CVRatioModel")
+    def setCond(self, cond, idxitem=None, keyitem=None):
+        prefix = "nmCvrCond"
+        if keyitem ==None:
+            for idx in cond:
+                for key in cond[idx]:
+                    self.CVRpanelWidgets[prefix+idx+key].SetValue(cond[idx][key])
+        else:
+            self.CVRpanelWidgets[prefix+idxitem+keyitem].SetValue(cond[idxitem][keyitem])
+        logger.debug("initiate the cond Bar value from self.cond in CVRatioModel")
+    def setCondBarOff(self):
+        prefix = "nmCvrCond"
+        for idx in list('123456'):
+            for nm in self.nmItems:
+                self.CVRpanelWidgets[prefix+idx+nm].Disable()
+    def setCondBarOnOff(self, idx, status):
+        prefix = "nmCvrCond"
+        for nm in self.nmItems:
+            if (status):
+                self.CVRpanelWidgets[prefix+idx+nm].Enable()
+            else:
+                self.CVRpanelWidgets[prefix+idx+nm].Disable()
+    def setPreCondBarOff(self):
+        prefix = "nmPreCond"
+        for nm in self.nmItems:
+            self.CVRpanelWidgets[prefix+nm].Disable()
+    def setPreCondBarOnOff(self, status):
+        prefix = "nmPreCond"
+        for nm in self.nmItems:
+            if (status):
+                self.CVRpanelWidgets[prefix+nm].Enable()
+            else:
+                self.CVRpanelWidgets[prefix+nm].Disable()
+    def setEndCondBarOnOff(self, status):
+        prefix = "nmCvrEndCond"
+        for nm in self.nmItems:
+            if (status):
+                self.CVRpanelWidgets[prefix+nm].Enable()
+            else:
+                self.CVRpanelWidgets[prefix+nm].Disable()
+    def setPanelOnOff(self, status):
+        if status==True:
+            for label in self.CVRpanelWidgets:
+                self.CVRpanelWidgets[label].Enable()
+            #self.gauge.Show()
+            #self.gauge.SetValue(5)
+        else:
+            for label in self.CVRpanelWidgets:
+                self.CVRpanelWidgets[label].Disable()
+    def setCvrStartTglBtnLabel(self, label):
+        self.CVRpanelWidgets["nmCvrStartTglBtn"].SetLabel(label)
+    def setCvrStartTglBtnValue(self, value):
+        self.CVRpanelWidgets["nmCvrStartTglBtn"].SetValue(value)
+    def setCvrStartTglBtnStatus(self, status):
+        if status==True:
+            self.CVRpanelWidgets["nmCvrStartTglBtn"].Enable()
+        else:
+            self.CVRpanelWidgets["nmCvrStartTglBtn"].Disable()
     def buildChooseCondData(self):
-        return ((u"开始日期", "2018-10-25",self.EvtDatePick),
-                    (u"截止日期", "2018-10-31",self.EvtDatePick))
+        return ((u"开始日期", "not_use",self.EvtRetNameDateStr, "nmCvrStartDate"),
+                    (u"截止日期", "not_use",self.EvtRetNameDateStr, "nmCvrEndDate"))
     def buildChooseCondDate(self):
         hSizer = wx.BoxSizer(wx.HORIZONTAL)
         for chooseCondDateItem in self.buildChooseCondData():
             self.buildOneChooseCondDate(hSizer, chooseCondDateItem)
         return hSizer
     def buildOneChooseCondDate(self, sizer, chooseCondDateItem):
-        for label, value, eHandler in [chooseCondDateItem]:
+        for label, value, eHandler, name in [chooseCondDateItem]:
             text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
             sizer.Add(text, 0, wx.ALL, 2)
-            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN | wx.adv.DP_SHOWCENTURY)
+            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DROPDOWN | wx.adv.DP_SHOWCENTURY, name=name)
+            self.CVRpanelWidgets[name] = datepicker
 #            datepicker = wx.adv.DatePickerCtrl(self, size=(100,-1), style = wx.adv.DP_DEFAULT)
-            self.Bind(wx.adv.EVT_DATE_CHANGED, self.EvtStartDate, datepicker)
+            self.Bind(wx.adv.EVT_DATE_CHANGED, eHandler, datepicker)
             sizer.Add(datepicker, 0, wx.ALL, 2)
     def buildChooseCondPriceData(self):
-        return ((u'收盘价', 2, self.choiceList, self.EvtCombo1Box, 5, self.EvtCombo1Box),
-                    (u'日均价', 1, self.pickList, self.EvtCombo1Box, '0', self.EvtCondText),
+        # Attention: don't change the name of widgets. Line 1972 use these name like this: elif (name[:9] =="nmPreCond"):
+        return ((u'收盘价',  self.choiceList, self.EvtRetNameString, "nmPreCondMAdir",5, self.EvtRetNameString, "nmPreCondMAdays"),
+                    (u'日均价',  self.pickList, self.EvtRetNameString, "nmPreCondDiffDir","1", self.EvtRetNameValue, "nmPreCondDiffValue"),
                     )
     def buildOneChooseCondPrice(self, sizer, chooseCondPriceItem):
-        for label, cmbxIdx1, choices, eHandler1,cmbxIdx2,eHandler2 in [chooseCondPriceItem]:
+        for label, choices, eHandler1, name1, cmbxIdx2,eHandler2, name2 in [chooseCondPriceItem]:
             text = wx.StaticText(self, label=label)
             sizer.Add(text, 0, wx.ALL, 2)
-            cmbx = wx.ComboBox(self, size=(50, -1), choices=choices, value=choices[cmbxIdx1],style=wx.CB_DROPDOWN|wx.CB_READONLY)
+            cmbx = wx.ComboBox(self, size=(50, -1), choices=choices, style=wx.CB_DROPDOWN|wx.CB_READONLY, name=name1)
+            self.CVRpanelWidgets[name1] = cmbx
             self.Bind(wx.EVT_COMBOBOX, eHandler1, cmbx)
             sizer.Add(cmbx, 0, wx.ALL, 2)
             if isinstance(cmbxIdx2,str):
                 #textctrl
-                obj = wx.SpinCtrl(self, size=(50,-1))
-                obj.SetRange(1,100)
+                obj = wx.SpinCtrl(self, size=(50,-1), name=name2)
+                obj.SetRange(1,1000)
                 obj.SetValue(int(cmbxIdx2))
                 self.Bind(wx.EVT_TEXT, eHandler2, obj)
             else:
                 #combox
-                obj = wx.ComboBox(self, size=(50, -1), choices=self.daysAveList, value=self.daysAveList[cmbxIdx2],style=wx.CB_DROPDOWN)
+                obj = wx.ComboBox(self, size=(45, -1), choices=self.daysAveList, value=self.daysAveList[cmbxIdx2],style=wx.CB_DROPDOWN, name=name2)
+                self.Bind(wx.EVT_TEXT, eHandler2, obj)
+            self.CVRpanelWidgets[name2] = obj
             sizer.Add(obj, 0, wx.ALL, 2)
+
             
-    def buildChooseCondPriceBar(self):
-        hSizer = wx.BoxSizer(wx.HORIZONTAL)
-        cbx = wx.CheckBox(self, label=u"筛选条件")
-        hSizer.Add(cbx,0,wx.ALL, 2)
-        for chooseCondPriceItem in self.buildChooseCondPriceData():
-            self.buildOneChooseCondPrice(hSizer,chooseCondPriceItem)
-        text = wx.StaticText(self, label='%', style=wx.ALIGN_CENTER)
-        hSizer.Add(text, 0, wx.ALL, 2)
-        return hSizer
     def buildChooseCondBar(self):
         box = wx.StaticBox(self, -1, u"筛选条件")
         staticsizer = wx.StaticBoxSizer(box, wx.VERTICAL)
         #row1
         sizer1 = self.buildChooseCondDate()
-        #row2
-        sizer2 = self.buildChooseCondPriceBar()
         staticsizer.Add(sizer1, 0, wx.ALL|wx.EXPAND, 2)
-        staticsizer.Add(sizer2, 0, wx.ALL|wx.EXPAND, 2)
+        sizer3 = self.buildChooseCondDayBar()
         
+        #staticsizer.Add(sizer2, 0, wx.ALL|wx.EXPAND, 2)
+        staticsizer.Add(sizer3, 0, wx.ALL|wx.EXPAND, 2)
+
         return staticsizer
     
+    def buildPreChooseCondBar(self):
+        box = wx.StaticBox(self, -1, u"初筛条件")
+        staticsizer = wx.StaticBoxSizer(box, wx.HORIZONTAL)
+        name = "nmPreCondCbx"
+        cbx = wx.CheckBox(self, label=u"初选", name = name)
+        self.CVRpanelWidgets[name] = cbx
+        self.Bind(wx.EVT_CHECKBOX, self.EvtRetNameValue, cbx)
+
+        staticsizer.Add(cbx,0,wx.ALL, 2)
+        for chooseCondPriceItem in self.buildChooseCondPriceData():
+            self.buildOneChooseCondPrice(staticsizer,chooseCondPriceItem)
+        text = wx.StaticText(self, label='%', style=wx.ALIGN_LEFT)
+        staticsizer.Add(text, 0, wx.ALL)
+        return staticsizer
+
+    def buildChooseCondDayBar(self):
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        for ChooseCondDayItem in self.creatAmErgStartData():
+            self.createOneAmtErg(sizer, ChooseCondDayItem)
+        return sizer
     def buildEndCondBar(self):
         box = wx.StaticBox(self, -1, u"终止条件")
         staticsizer = wx.StaticBoxSizer(box, wx.VERTICAL)
         
         #ROW1
-        sizer1 = self.buildOneEndPrice()
+        #sizer1 = self.buildOneEndPrice()
+        sizer1 = self.buildOneAveRelation(list(self.buildEndPriceData()))
         #ROW2
         sizer2 = wx.BoxSizer(wx.HORIZONTAL)
         for endCondItem in self.creatEndCondData():
@@ -885,47 +1038,51 @@ class LeftPanel(wx.Panel):
         
         return staticsizer
     def buildOneEndCond(self, sizer, endCondItem):
-        for idx, value, eHandler, label in [endCondItem]:
-            sc = wx.SpinCtrl(self, size=(40,-1))
-            sc.SetRange(1,100)
-            sc.SetValue(value)
-            self.Bind(wx.EVT_TEXT, self.EvtCondText, sc)
+        for xsize, eHandler, label , name in [endCondItem]:
+            sc = wx.SpinCtrl(self, size=(xsize,-1), name=name)
+            self.CVRpanelWidgets[name] = sc
+            sc.SetRange(1,1000)
+            #sc.SetValue(value)
+            self.Bind(wx.EVT_TEXT, eHandler, sc)
             sizer.Add(sc, 0, wx.ALL, 2)
             text = wx.StaticText(self, label=label, style=wx.ALIGN_CENTER)
             sizer.Add(text, 0, wx.ALL, 2)
     def creatEndCondData(self):
-        return (('end', 1, self.EvtEndCond, u'天内至少'),
-                    ('end', 1, self.EvtEndCond, u'天以上满足终止条件且不满足均价关系'))
+        return ((45, self.EvtRetNameValue, u'天内至少', "nmCvrEndDayRange"),
+                    (40, self.EvtRetNameValue, u'天以上满足终止条件且不满足均价关系', "nmEndDays"))
     def buildEndPriceData(self):
-        return ((u'收盘价', self.choiceList,2, self.EvtEndCond, self.daysAveList, 5, self.EvtEndCond),
-                        (u'日均价', self.pickList,1, self.EvtEndCond, '', '0', self.EvtEndCond))
-    def buildOneEndPrice(self):
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        cbx = wx.CheckBox(self, label=u'终止条件')
-        self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, cbx)
-        sizer.Add(cbx, 0, wx.ALL, 2)
-        for label, choices, idx1, eHandler1, daychoices, idx2, eHandler2 in self.buildEndPriceData():
-            text = wx.StaticText(self, label=label)
-            sizer.Add(text, 0, wx.ALL, 2)
-            cmbx = wx.ComboBox(self, size=(60, -1), choices=choices, value=choices[idx1],style=wx.CB_DROPDOWN)
-            self.Bind(wx.EVT_COMBOBOX, self.EvtCom1Box, cmbx )
+        return (u'终止', self.EvtRetNameValue, 0, self.EvtRetNameString, 1,1, '10', "nmCvrEndCond")
+        #return ((u'收盘价', self.choiceList, self.EvtEndCond, self.daysAveList, 5, self.EvtEndCond,"nmCvrEnd"),
+        #                (u'日均价', self.pickList, self.EvtEndCond, '', '0', self.EvtEndCond))
+    #def buildOneEndPrice(self):
+    #    sizer = wx.BoxSizer(wx.HORIZONTAL)
+        #cbx = wx.CheckBox(self, label=u'终止')
+        #self.Bind(wx.EVT_CHECKBOX, self.EvtCheckBox, cbx)
+        #sizer.Add(cbx, 0, wx.ALL, 2)
+        #for label, choices, idx1, eHandler1, daychoices, idx2, eHandler2 in self.buildEndPriceData():
+        #    text = wx.StaticText(self, label=label)
+        #    sizer.Add(text, 0, wx.ALL, 2)
+        #    cmbx = wx.ComboBox(self, size=(60, -1), choices=choices, value=choices[idx1],style=wx.CB_DROPDOWN)
+        #    self.Bind(wx.EVT_COMBOBOX, self.EvtCom1Box, cmbx )
             
-            cmbx.Disable()
-            sizer.Add(cmbx, 0, wx.ALL, 2)
-            if (daychoices != ''):
-                obj = wx.ComboBox(self, size=(60, -1), choices=daychoices, value=daychoices[idx2],style=wx.CB_DROPDOWN)
-                self.Bind(wx.EVT_COMBOBOX, self.EvtCom1Box, obj )
-            else:
-                obj = wx.TextCtrl(self, value='0', size=(30,-1))
-                self.Bind(wx.EVT_TEXT, self.EvtCondText, obj)   
-            obj.Disable()
-            sizer.Add(obj, 0, wx.ALL, 2)
-        text = wx.StaticText(self, label='%')
-        sizer.Add(text, 0, wx.ALL, 2)
-        return sizer    
+        #    cmbx.Disable()
+        #    sizer.Add(cmbx, 0, wx.ALL, 2)
+        #    if (daychoices != ''):
+        #        obj = wx.ComboBox(self, size=(60, -1), choices=daychoices, value=daychoices[idx2],style=wx.CB_DROPDOWN)
+        #        self.Bind(wx.EVT_COMBOBOX, self.EvtCom1Box, obj )
+        #    else:
+        #        obj = wx.TextCtrl(self, value='0', size=(30,-1))
+        #        self.Bind(wx.EVT_TEXT, self.EvtCondText, obj)   
+        #    obj.Disable()
+        #    sizer.Add(obj, 0, wx.ALL, 2)
+        #text = wx.StaticText(self, label='%')
+        #sizer.Add(text, 0, wx.ALL, 2)
+        #return sizer    
 
+    def creatAmErgStartData(self):
+        return ((u'连续满足筛选条件及均价关系', '100', self.EvtRetNameValue, u'天以上' ,"nmCvrDays"),)
     def createAmtErgData(self):
-        return ((u'累计量能达到', '100', self.EvtAmtErg, u'%以上' ),)
+        return ((u'累计量能达到', '100', self.EvtRetNameValue, u'%以上' , "nmCVRatioThreshold"),)
     def createAmtErgBars(self):
         box = wx.StaticBox(self, -1, u"量能标准")
         staticsizer = wx.StaticBoxSizer(box, wx.HORIZONTAL)
@@ -933,16 +1090,17 @@ class LeftPanel(wx.Panel):
             self.createOneAmtErg(staticsizer, amountErgItem)
         return staticsizer
     def createOneAmtErg(self, sizer, amountErgItem):
-        for label, value, eventHandler, label2 in [amountErgItem]:
+        for label, value, eventHandler, label2, name in [amountErgItem]:
             text= wx.StaticText(self, label=label)
-            sizer.Add(text, 0, wx.ALL, 2)
-            sc = wx.SpinCtrl(self, size=(50,-1))
-            sc.SetRange(1,100)
-            sc.SetValue(value)
-            self.Bind(wx.EVT_TEXT, eventHandler, sc)    
-            sizer.Add(sc, 0, wx.ALL, 2)
+            sizer.Add(text, 0, wx.ALL)
+            sc = wx.SpinCtrl(self, size=(50,-1), name = name)
+            sc.SetRange(1,9000)
+            #sc.SetValue(value)
+            self.Bind(wx.EVT_TEXT, eventHandler, sc)
+            self.widgetsInPanel[name] = sc
+            sizer.Add(sc, 0, wx.ALL)
             text = wx.StaticText(self, label=label2)
-            sizer.Add(text, 0, wx.ALL, 2)
+            sizer.Add(text, 0, wx.ALL)
     
     def buildAveRelationBars(self):
         box = wx.StaticBox(self, -1, u"均价关系")
@@ -953,84 +1111,81 @@ class LeftPanel(wx.Panel):
             staticsizer.Add(sizer, 0, wx.ALL, 2)
         return staticsizer
     def buildAveRelationData(self):
-        return ((u'条件一', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
-                    (u'条件二', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
-                    (u'条件三', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
-                    (u'条件四', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
-                    (u'条件五', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox),
-                    (u'条件六', self.EvtCheckBox, 0, self.EvtCombo1Box, 1, self.EvtCombo2Box,1, self.Evtcombo3Box, '10', self.EvtComboBox))
+        return ( (u'条件一', self.EvtRetNameValue, 0, self.EvtRetNameString, 1,1, '10', "nmCvrCond1"),
+                    (u'条件二', self.EvtRetNameValue, 0, self.EvtRetNameString, 1,1, '10', "nmCvrCond2"),
+                    (u'条件三', self.EvtRetNameValue, 0, self.EvtRetNameString, 1,1, '10', "nmCvrCond3"),
+                    (u'条件四', self.EvtRetNameValue, 0, self.EvtRetNameString, 1,1, '10', "nmCvrCond4"),
+                    (u'条件五', self.EvtRetNameValue, 0, self.EvtRetNameString, 1,1, '10', "nmCvrCond5"),
+                    (u'条件六', self.EvtRetNameValue, 0, self.EvtRetNameString, 1,1, '10', "nmCvrCond6"))
     def buildOneAveRelation(self, aveRelationItem):
         sizer = wx.BoxSizer(wx.HORIZONTAL)
-        for cbxLabel, cbxHandler, cmb1idx, cmb1Handler, \
-        cmb2idx, cmb2Handler, cmb3idx, cmb3Handler, \
-        value, textHandler in [aveRelationItem]:
-            cbx = wx.CheckBox(self, label=cbxLabel)
+        for cbxLabel, cbxHandler, cmb1idx, cmbxhandler, \
+        cmb2idx, cmb3idx, value, name in [aveRelationItem]:
+            namecbx = name+"Cbx"
+            cbx = wx.CheckBox(self, label=cbxLabel, name=namecbx)
             self.Bind(wx.EVT_CHECKBOX, cbxHandler, cbx)
             sizer.Add(cbx, 0, wx.ALL, 2)
-            
+            #"nmCvrCond1cbx"
+            self.CVRpanelWidgets[namecbx] = cbx
             text = wx.StaticText(self, label=u'收盘价')
             sizer.Add(text, 0, wx.ALL, 2)
             
-            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.choiceList, value=self.choiceList[cmb1idx],style=wx.CB_DROPDOWN)
-            self.Bind(wx.EVT_COMBOBOX, cmb1Handler, cmbx )
+            namecmbx=name+'MAdir'
+            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.choiceList, value=self.choiceList[cmb1idx], \
+                                style=wx.CB_DROPDOWN|wx.CB_READONLY, name=namecmbx)
+            self.Bind(wx.EVT_COMBOBOX, cmbxhandler, cmbx )
+            #"nmCvrCond1MAdir"
+            self.CVRpanelWidgets[namecmbx] = cmbx
             sizer.Add(cmbx, 0, wx.ALL, 2)
             
-            cmbx = wx.ComboBox(self, size=(40, -1), choices=self.daysAveList, value=self.daysAveList[cmb2idx],style=wx.CB_DROPDOWN)
-            self.Bind(wx.EVT_COMBOBOX, cmb2Handler, cmbx )
+            namecmbx=name+'MAdays'
+            cmbx = wx.ComboBox(self, size=(45, -1), choices=self.daysAveList, value=self.daysAveList[cmb2idx], \
+                                style=wx.CB_DROPDOWN|wx.CB_READONLY, name=namecmbx)
+            self.Bind(wx.EVT_COMBOBOX, cmbxhandler, cmbx )
+            #"nmCvrCond1MAdays"
+            self.CVRpanelWidgets[namecmbx] = cmbx
             sizer.Add(cmbx, 0, wx.ALL, 2)
-            
             text = wx.StaticText(self, label=u'日均价')
             sizer.Add(text, 0, wx.ALL, 2)
             
-            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.pickList, value=self.pickList[cmb3idx],style=wx.CB_DROPDOWN)
-            self.Bind(wx.EVT_COMBOBOX, cmb3Handler, cmbx )
+            namecmbx=name+'DiffDir'
+            cmbx = wx.ComboBox(self, size=(50, -1), choices=self.pickList, value=self.pickList[cmb3idx], \
+                            style=wx.CB_DROPDOWN|wx.CB_READONLY, name=namecmbx)
+            self.Bind(wx.EVT_COMBOBOX, cmbxhandler, cmbx )
+            #"nmCvrCond1DiffDir"
+            self.CVRpanelWidgets[namecmbx] = cmbx
             sizer.Add(cmbx, 0, wx.ALL, 2)
             
-            textctrl = wx.TextCtrl(self, value=value, size=(30,-1))
-            self.Bind(wx.EVT_TEXT, textHandler, textctrl)
+
+            namecmbx=name+'DiffValue'
+            textctrl = wx.TextCtrl(self, value=value, size=(30,-1), name = namecmbx)
+            self.Bind(wx.EVT_TEXT, cmbxhandler, textctrl)
+            #"nmCvrCond1DiffValue"
+            self.CVRpanelWidgets[namecmbx] = textctrl
             sizer.Add(textctrl, 0, wx.ALL, 2)
             
             text = wx.StaticText(self, label='%')
-            sizer.Add(text, 0, wx.ALL, 2)
+            sizer.Add(text, 0, wx.ALL)
         return sizer    
-    def EvtCheckBox(self, e):
-        print(e)
-        a = e.GetEventObject()
-        print(a)
-        print(a.GetValue())
-    def EvtStartDate(self, e):
-        print(e)
-        print(e.GetDate())
-        a = e.GetDate()
-        b=a.FormatISODate()
-        print(type(a))
-        print(b)
-    def EvtCond1(self, event):
-        pass
-    def EvtCombo1Box(self, e):
-        print(e)
-        print(e.GetSelection())
-        print(e.GetString())
-        pass
-    def EvtCombo2Box(self, event):
-        pass
-    def Evtcombo3Box(self, event):
-        pass
-    def EvtCondText(self, event):
-        pass
-    def EvtAmtErg(self, event):
-        pass
-    def EvtCom1Box(self, event):
-        pass
-    def EvtEndCond(self, event):
-        pass
-    def Evt_Startup(self, event):
-        pass
-    def EvtComboBox(self):
-        pass
-    def EvtDatePick(self):
-        pass
-class RightPanel(wx.Panel):
+
+    def buildCvrStartTglBtnData(self):
+        return (u"开始能量筛选","nmCvrStartTglBtn", self.EvtRetNameValue )
+
+    def buildCvrStartTglButton(self, sizer):
+        for label, name, ehandler in [self.buildCvrStartTglBtnData()]:
+            btn = wx.ToggleButton(self, -1, label=label, name= name)        # add buttons
+            self.CVRpanelWidgets[name] = btn
+            sizer.Add(btn, 0, wx.ALL)
+            self.Bind(wx.EVT_TOGGLEBUTTON, ehandler, btn)
+    
+    def buildCvrStartBar(self):
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.buildCvrStartTglButton(sizer)
+        self.buildGauge(sizer)
+        return sizer
+
+    
+class CVRrightPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
         mainsplitter = MultiSplitterWindow(self, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
@@ -1053,7 +1208,7 @@ class RightPanel(wx.Panel):
 class RightUpPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
-#        t = wx.StaticText(self, -1, "This is a RightPanel object", (20,20))                
+#        t = wx.StaticText(self, -1, "This is a CVRrightPanel object", (20,20))                
         grid = wx.grid.Grid(self)
 #        self.data = self.getStockData()
         self.data = {}
@@ -1165,9 +1320,9 @@ class RPSRightDownPanel(wx.Panel):
         self.displayMultiples=False
         
         
-#        self.RightPanel = wx.Panel(self,-1)  
+#        self.CVRrightPanel = wx.Panel(self,-1)  
 #        #测试按钮1  
-#        self.Button1 = wx.Button(self.RightPanel,-1,"TestButton",size=(100,40),pos=(10,10))  
+#        self.Button1 = wx.Button(self.CVRrightPanel,-1,"TestButton",size=(100,40),pos=(10,10))  
 #        self.Button1.Bind(wx.EVT_BUTTON,self.Button1Event)  
 #        #创建FlexGridSizer  
 #        self.FlexGridSizer=wx.FlexGridSizer( rows=5, cols=1, vgap=5,hgap=5)  
@@ -1176,7 +1331,7 @@ class RPSRightDownPanel(wx.Panel):
 #        self.FlexGridSizer.Add(self.Button1,proportion =0, border = 5,flag = wx.ALL | wx.EXPAND)  
 #   
 #   
-#        self.RightPanel.SetSizer(self.FlexGridSizer)  
+#        self.CVRrightPanel.SetSizer(self.FlexGridSizer)  
 #      
         
      
@@ -1187,7 +1342,7 @@ class RPSRightDownPanel(wx.Panel):
         
 #        self.BoxSizer.Add(self.MPL,flag = wx.ALL | wx.EXPAND)  
         self.BoxSizer.Add(self.MPL, proportion =-1, border = 0,flag = wx.ALL | wx.EXPAND)  
-#        self.BoxSizer.Add(self.RightPanel,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)  
+#        self.BoxSizer.Add(self.CVRrightPanel,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)  
         self.SetBackgroundColour("white")
         self.SetSizer(self.BoxSizer)
         self.Fit()
@@ -1474,16 +1629,16 @@ class RightDownPanel(wx.Panel):
     
         
         
-class PickByEnergy(wx.Panel):
+class CVRatioPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
         mainsplitter = MultiSplitterWindow(self, style=wx.SP_3D | wx.SP_LIVE_UPDATE)
-        self.splitterpanel1 = LeftPanel(mainsplitter)
-        self.splitterpanel2 = RightPanel(mainsplitter)
+        self.splitterpanel1 = CVRLeftPanel(mainsplitter)
+        self.splitterpanel2 = CVRrightPanel(mainsplitter)
         mainsplitter.SetOrientation(wx.HORIZONTAL)
         mainsplitter.AppendWindow(self.splitterpanel1, -1)
         mainsplitter.AppendWindow(self.splitterpanel2, -1)
-        mainsplitter.SetSashPosition(0, 420)
+        mainsplitter.SetSashPosition(0, 400)
 #        mainsplitter.SetMinimumPaneSize(0)
         mainSizer = wx.BoxSizer(wx.VERTICAL)
         mainSizer.Add(mainsplitter, 1, wx.EXPAND | wx.ALL)
@@ -1495,7 +1650,7 @@ class PickByEnergy(wx.Panel):
 
 class MyFrame(wx.Frame):
     def __init__(self, parent, title=""):
-        wx.Frame.__init__(self, parent, title=title, size=(1000,600))
+        wx.Frame.__init__(self, parent, title=title, size=(1000,800))
         self.CreateStatusBar()
         # 1st Generate menus: File, Edit
 #        self.createMenuBar()
@@ -1504,9 +1659,9 @@ class MyFrame(wx.Frame):
         nb = wx.Notebook(p)
         
         # Here we create a panel and a notebook on the panel
-        page1 = PickByEnergy(nb)
+        page1 = CVRatioPanel(nb)
         page2 = DnldHQDataPanel(nb)
-        page3 = PageThree(nb)
+        page3 = RPSFrontPanel(nb)
 
         
         
@@ -1585,7 +1740,7 @@ class MyFrame(wx.Frame):
 
 class Viewer(wx.Frame):
     def __init__(self, parent, title=""):
-        wx.Frame.__init__(self, parent, title=title, size=(1000,600))
+        wx.Frame.__init__(self, parent, title=title, size=(1000,660))
         self.CreateStatusBar()
         # 1st Generate menus: File, Edit
 #        self.createMenuBar()
@@ -1594,9 +1749,9 @@ class Viewer(wx.Frame):
         nb = wx.Notebook(p)
         
         # Here we create a panel and a notebook on the panel
-        self.page1 = PickByEnergy(nb)
+        self.page1 = CVRatioPanel(nb)
         self.page2 = DnldHQDataPanel(nb)
-        self.page3 = PageThree(nb)
+        self.page3 = RPSFrontPanel(nb)
 
         
         
@@ -1605,7 +1760,7 @@ class Viewer(wx.Frame):
         nb.AddPage(self.page2, "数据更新")
         nb.AddPage(self.page3, "RPS")
         # Choose Page 2
-        nb.SetSelection(2)
+        nb.SetSelection(0)
         # finally, put the notebook in a sizer for the panel to manage
         # the layout
         self.SetBackgroundColour("white")
@@ -1677,11 +1832,13 @@ class Controller(object):
         # 1. model
         self.dnldModel = dataworker.DnldHQDataModel()
         self.calcRPSModel = dataworker.CalcRPS_Model()
+        self.cvratioModel = dataworker.CVRatioModel()
         # 2. parent view 
         self.view = Viewer(None, title)
         # 3. child view
         self.rpsController = Controller_RPS(self.view.page3.splitterpanel1, self.view.page3.splitterpanel2, self.calcRPSModel)
         self.dnldDataController = Controller_dnldData(self.view.page2, self.dnldModel)
+        self.cvrController = Controller_CVRatio(self.view.page1.splitterpanel1, self.cvratioModel)
         # 4. show view
         self.view.Show()
                 
@@ -1845,26 +2002,114 @@ class Controller_RPS(object):
             #self.view.setGaugeCount(msg)        
             pass
     
-class Viewer_Base(object):
-    def __init__(self):
-        pass
-    def setStartDate(self, date):
-        self.textPanelFields["start date"].SetValue(datetime.strptime(date, "%Y%m%d"))
-        self.setLoggerMsg(date)
-    
-    def setEndDate(self, date):
-        #self.textPanelFields["end date"].SetValue(date)
-        self.textPanelFields["end date"].SetValue(datetime.strptime(date, "%Y%m%d"))
-        self.setLoggerMsg(date)
 
-    def setWorkDays(self, days):
-        self.textPanelFields["work days"].SetValue(days)
-        self.setLoggerMsg(days)
-
-    def setAuType(self, autype):
-        self.auTyperbx.SetSelection(self.auTyperbx.FindString(autype))
-        self.setLoggerMsg(autype)
+class Controller_CVRatio(object):
+    def __init__(self, view, model):
+        logger.debug("hello, %s",__class__)
+        self.model=model
+        self.view = view
+        self.view.setDatebyName("nmCvrStartDate", self.model.cvrStartDate)
+        self.view.setDatebyName("nmCvrEndDate", self.model.cvrEndDate)
+        self.view.setValueByName("nmCvrDays", self.model.cvrDays)
+        self.view.setPreCond(self.model.preCond)
+        self.view.setCond(self.model.cond)
+        self.view.setValueByName("nmCVRatioThreshold", self.model.cvrThreshold)
+        self.view.setValueByName("nmCvrEndDayRange", self.model.cvrEndDayRange)
+        self.view.setValueByName("nmEndDays", self.model.cvrEndDays)
+        ##Disable CondBar
+        #self.view.setCondBarOff()
+        ##Disable PreCond Bar
+        #self.view.setPreCondBarOff()
         
+        
+        
+        # msg from view to controller
+        pub.subscribe(self.pubMsg_CVRLeftPanel, "pubMsg_CVRLeftPanel")
+        # msg from model to controller
+        pub.subscribe(self.pubMsg_CVRatioModel, "pubMsg_CVRatioModel")
+
+    def pubMsg_CVRLeftPanel(self, msg):
+        logger.debug("pubMsg_CVRLeftPanel: msg = %s", msg)
+        if (isinstance(msg, tuple)):
+            name, para = msg
+            if (name =="nmCvrStartDate"):
+                self.model.cvrStartDate = para
+                logger.debug("set cvrStartDate = %s", self.model.cvrStartDate)
+            elif (name =="nmCvrEndDate"):
+                self.model.cvrEndDate = para
+                logger.debug("set cvrEndDate = %s", self.model.cvrEndDate)
+            elif (name =="nmCvrDays"):
+                self.model.cvrDays = para
+                logger.debug("set cvrDays = %s", self.model.cvrDays)
+            elif (name[:9] =="nmPreCond"):
+                key = name[9:]
+                self.model.preCond[key] = para
+                #Toggle ON/OFF of cond Bar
+                if (key =="Cbx"):
+                    self.view.setPreCondBarOnOff(para)
+                logger.debug("set preCond[\"%s\"] = %s", name[9:], self.model.preCond[name[9:]])
+            elif (name[:9] =="nmCvrCond"):
+                #nmCvrCond1MAdays, cond['1']['MAdays'] = para
+                idx = name[9]
+                key = name[10:]
+                self.model.cond[idx][key] = para
+                #Toggle ON/OFF of cond Bar
+                if (key =="Cbx"):
+                    self.view.setCondBarOnOff(idx, para)
+                logger.debug("set cond[\"%s\"][\"%s\"] = %s", idx, key, self.model.cond[idx][key])
+            elif (name =="nmCVRatioThreshold"):
+                self.model.cvrThreshold = para
+                logger.debug("set cvrThreshold = %s", self.model.cvrThreshold)
+            elif (name[:12] =="nmCvrEndCond"):
+                key=name[12:]
+                self.model.cvrEndCond[key]=para
+                logger.debug("set cvrEndCond[\"%s\"] = %s", key, self.model.cvrEndCond[key])
+                if (key=="Cbx"):
+                    self.view.setEndCondBarOnOff(para)
+            elif (name == "nmCvrEndDayRange"):
+                self.model.cvrEndDayRange = para
+                logger.debug("set cvrEndDayRange = %s", self.model.cvrEndDayRange)
+            elif (name == "nmEndDays"):
+                self.model.cvrEndDays = para
+                logger.debug("set cvrEndDays = %s", self.model.cvrEndDays)
+            elif (name =="nmCvrStartTglBtn"):
+                self.worker_startCVRBtn(para)
+            pass
+    def pubMsg_CVRatioModel(self, msg):
+        logger.debug("pubMsg_CVRatioModel: msg = %s", msg)
+        if (isinstance(msg, tuple)):
+            name, para = msg
+            if (name =="startCVRBtn"):
+                self.view.setPanelOnOff(False)
+                self.view.setCvrStartTglBtnStatus(True)
+            elif (name =="endCVRBtn"):
+                self.view.setPanelOnOff(True)
+                self.view.setCvrStartTglBtnValue(False)
+                self.view.setCvrStartTglBtnLabel(u'开始量能筛选')
+                self.view.setGaugeShowHide("nmGauage", False)
+                self.view.setGaugeCounter("nmGauage", 0)
+                logger.debug("endCVRBtn")
+            elif (name =="updateGaugeCounter"):
+                self.view.setGaugeCounter("nmGauage", para)
+            pass
+    def worker_startCVRBtn(self, para):
+        if (para == True):
+            self.view.setPanelOnOff(False)
+            self.view.setCvrStartTglBtnLabel(u'停止')
+            self.view.setGaugeShowHide("nmGauage", True)
+            self.model.runCvrAllowed=True
+            logger.debug("pubMsg_CVRatioModel: start CVR")
+            #update button pressed, to start, from viewer
+            t = threading.Thread(target=self.model.calcCVR, args=())
+            t.start()
+        elif (para ==False):
+            self.model.runCvrAllowed=False
+            self.view.setCvrStartTglBtnStatus(False)
+            #self.view.setRPSPanelOn()   #TODO:only for test. REMOVE this in formal use. setRPSPanelOn() shoule be called when task is finished.
+            logger.debug("pubMsg_CVRatioModel: stop CVR")
+            #update button pressed, to stop, from viewer
+        logger.debug("worker_startCVR")
+
 class Controller_dnldData(object):
     def __init__(self, view, model):
         logger.debug("hello, %s",__class__)
@@ -1911,23 +2156,6 @@ class Controller_dnldData(object):
                     #check box from viewer
                     self.model.set_DBname_and_autype(msg[1])
     
-#    def worker_updateButton(self, para):
-#        if (para == "updating data"):
-#            self.view.setPanelOff()
-#            self.view.setUpdateButtonLabel('Stop')
-#            self.model.HQonoff=1
-#            self.view.setLoggerMsg('Start data update')
-#            logger.debug("pubMsg_DnldHQdataPanel: start data update")
-#            #update button pressed, to start, from viewer
-#            t = threading.Thread(target=self.model.updateHQdata, args=())
-#            t.start()
-#        elif (para =='stop updating'):
-#            self.model.HQonoff=0
-#            self.view.setUpdateButtonOff()
-#            self.view.setLoggerMsg('Stop data update')
-#            logger.debug("pubMsg_DnldHQdataPanel: stop data update")
-#            #update button pressed, to stop, from viewer
-  
     def worker_dnldStartButton(self, para):
         if (para == True):
             self.view.setPanelOff()
@@ -2033,13 +2261,6 @@ class DnldHQDataPanel(wx.Panel):
                          style=wx.RA_SPECIFY_ROWS, name="auType cbx")
         grid.Add(self.auTyperbx, pos=(startY+1,startX), span=(1,2))
         self.Bind(wx.EVT_RADIOBOX, self.EvtTypeRadioBox, self.auTyperbx)
-#        self.sizer2 = wx.BoxSizer(wx.HORIZONTAL)    #ob2
-#        self.buttons = []
-#        for i in range(0, 3):
-#            self.buttons.append(wx.Button(self,-1, "Button &"+str(i)))        # add buttons
-#            self.sizer2.Add(self.buttons[i], 1, wx.EXPAND)    # Add several buttons in sizer2; para=1 means 1:1:1.., try 'i'
-
-        #hSizer = grid + logger, mainSizer = hSizer + Button.
         hSizer.Add(grid, 0, wx.ALL, 5)
         hSizer.Add(self.logger, 0, wx.ALL, 5)
         mainSizer.Add(hSizer, proportion=0,flag=wx.EXPAND|wx.ALL, border=5)

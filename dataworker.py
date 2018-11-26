@@ -82,7 +82,6 @@ import wx.adv
 from wx.lib.splitter import MultiSplitterWindow
 
 
-G_NUM_OF_CODES = 3      #3625
 from viewer import logger
 class Sqlite3Handler(object):
     def __init__(self, autypeStr='qfq'):
@@ -186,8 +185,12 @@ class CalcRPS_Model(Sqlite3Handler):
         self.rps_enddate = datetime.now().strftime("%Y%m%d")
         #self.autype='qfq'
         super(CalcRPS_Model, self).__init__("hfq")
-        self.maxDateInDBStr = self.getMaxDateInDB()
+        self.maxDateInDBStr = self.readMaxDateInAttr_t()
+        logger.debug("maxDateInDBStr is %s", self.maxDateInDBStr)
 
+    def readMaxDateInAttr_t(self):
+        cmd = "SELECT maxdate FROM %s "%('attr_t')
+        return self.engine.execute(cmd).fetchone()[0]
     def getMaxDateInDB(self):
         cmd = "SELECT MAX(%s) FROM %s WHERE ts_code='%s'"%("trade_date", self.tablenm_hqall, "000001.SZ")
         try:
@@ -508,35 +511,42 @@ class DnldHQDataModel(Sqlite3Handler):
 #        self.engine = create_engine('sqlite+pysqlite:///file.db', module=sqlite)
         name = __class__
         super(DnldHQDataModel, self).__init__('hfq')
-#        
-#        self.autypeStr = 'qfq'
-#        self.set_DBname_and_autype(self.autypeStr)
-#        self.hq_codes = self.get_codes()
-#        self.tablenm_hqall='hqall_t'
 
-        pass
+        #self.maxDateInDBStr = self.getMaxDateInDB()
+
+    def getMaxDateInDB(self):
+        cmd = "SELECT MAX(%s) FROM %s WHERE ts_code='%s'"%("trade_date", self.tablenm_hqall, "000001.SZ")
+        try:
+            dateStr = self.engine.execute(cmd).fetchone()[0].split(" ")[0]
+            logger.info("maxinum date in database is %s", dateStr)
+        except Exception as e:
+            logger.error("Error to read max Date in getRPSbyDate!\n, %s",e)
+            return None
+        return dateStr
+    
+    def readMaxDateInAttr_t(self):
+        cmd = "SELECT maxdate FROM %s "%('attr_t')
+        return self.engine.execute(cmd).fetchone()[0]
         
-    
-#    def set_DBname_and_autype(self, autypeStr):
-#        if (autypeStr == 'nfq'):
-#            self.autype=None
-#            self.autypeStr='nfq'
-#        elif (autypeStr == 'hfq'):
-#            self.autype='hfq'
-#            self.autypeStr='hfq'
-#        elif (autypeStr == 'qfq'):
-#            self.autype='qfq'
-#            self.autypeStr='qfq'
-#        self.sql_filename = autypeStr+'_'+self.sql_filename_base
-#        self.engine = create_engine('sqlite+pysqlite:///%s'%self.sql_filename, module=sqlite)
-#        self.initDB()
-#        logger.debug("change to %s database and engine",self.sql_filename)
-#        
-#    def get_hist_k_data(self):
-#        pass
-#    #engine = create_engine("sqlite:///:memory:", echo=True)
-#        f = ts.get_k_data('000673', '2018-10-08', '2018-10-17')
-    
+    def updateMaxDateInDB(self, dateStr):
+#        dateStr = '20181101'
+        cmd = "UPDATE attr_t SET maxdate = '%s' "%dateStr
+        self.engine.execute(cmd)
+        
+    def buildAttrTableIfNotExist(self):
+        
+        cmd = "select count(*)  from sqlite_master where type='table' and name = '%s'"%'attr_t'
+        counter = list(self.engine.execute(cmd).fetchone())[0]
+        if counter==0:
+            
+            try:
+                maxDateStr = self.getMaxDateInDB()
+            except Exception as e:
+                logger.error(e)
+                maxDateStr="19700101"
+            logger.debug("creat attr_t and init maxdate= %s", maxDateStr)
+            df = pd.DataFrame([maxDateStr], columns=['maxdate'],index=['info'])
+            df.to_sql('attr_t',self.engine, if_exists="replace", index=True)
     def checkDateTableExist(self,date=None):
         if (date==None):
             date = datetime.now().strftime("%Y%m%d")
@@ -633,13 +643,21 @@ class DnldHQDataModel(Sqlite3Handler):
         logger.debug("download data start now ......")
         #TODO: verify validation of start_date, end_date
         gaugeCounter = 0
-        ts_dates=list(self.getDateStrListToDnld(self.start_date, self.end_date))
+        try:
+            ts_dates=list(self.getDateStrListToDnld(self.start_date, self.end_date))
+        except Exception as e:
+            logger.debug("generate ts_dates failure, %s",e)
         #logger.debug('ts_dates = %s ', list(ts_dates))
         if (len(ts_dates)==0):
             gaugeStep = 100
         else:
             gaugeStep = 100/(4*len(ts_dates))
         #print(ts_dates)
+        
+        #build attr_t table if not exist
+        self.buildAttrTableIfNotExist()
+        maxDateStr = self.readMaxDateInAttr_t()
+        logger.debug("maxDateStr = %s", maxDateStr)
         for ts_date in ts_dates:
             gaugeCounter += gaugeStep
             #print(ts_date)
@@ -671,6 +689,7 @@ class DnldHQDataModel(Sqlite3Handler):
                         df = pd.merge(df4,df3,on=['ts_code','trade_date'])
                         # calc backward weighted close
                         df['weighted_close']=(df['close']*df['adj_factor']).round(2)
+                        
                         ## caculate weighted high, open, low
                         #df['w_open'] = (df['weighted_close']*(1+(df['open']-df['close'])/df['close'])).round(2)
                         #df['w_high'] = (df['weighted_close']*(1+(df['high']-df['close'])/df['close'])).round(2)
@@ -890,83 +909,239 @@ class DnldHQDataModel(Sqlite3Handler):
                 else:
                     continue
         return ret
-#    def initDB(self):
-#        """Generate 'codes_t', which has all stock codes, into sqlite_db if there is no 'codes_t' in sqlite_db"""
-#        # 1. check if 'codes_t' exists
-#        cmd = "select count(*)  from sqlite_master where type='table' and name = '%s'"%'codes_t'
-#        if ((self.engine.execute(cmd).fetchall()[0][0])==0):
-#            # 2. 'codes_t' not exists, check if 'codes_table.csv' exists. Try to generate 'codes_t' from 'codes_table.csv'
-#            # 2.1 check if 'codes_table.csv' exists, generate one if not using get_today_all()
-#            if (not os.path.isfile('codes_table.csv')):
-#                #generate 'codes_table.csv' using get_today_all()
-#                self.generate_codes_csv('codes_table.csv', 5)
-#            # 2.2 check if 'codes_table.csv' exists, generate 'codes_t' in DB if exists, raise an error if not.
-#            if (os.path.isfile('codes_table.csv')):
-#                # generate 'codes_t' from 'codes_table.csv'
-#                codes_df = pd.read_csv('codes_table.csv', dtype='str',names=['id','code'])
-#                try:
-#                    codes_df["code"].to_sql('codes_t', self.engine)
-#                except ValueError as e:
-#                    logger.info(e)
-#                except Exception as e:
-#                    logger.info(e)
-#            else: 
-#                # raise an error, 'codes_table.csv' fails, try again
-#                logger.error('fail to generate codes_table.csv, try again')
-#                assert (1==0)
-#    
-#    def initCodeTable(self, flag='ifexist'):
-##        date = datetime.now().strftime("%Y%m%d")
-##        code_df = pd.DataFrame(r.fetchall(), columns=['code'])
-#        cmd_get_codes = "SELECT code FROM codes_t"
-#        try:
-#            assert(flag=='ifnotexist')
-#            r = self.engine.execute(cmd_get_codes)
-#            # codes_t exists in engine, pass
-#            pass
-#        except Exception as e:
-#            #force to init codes_t from csv
-#            logger.debug(e)
-#            logger.debug("engine does not have codes_t, init code_t from csv")
-#            try:
-#                code_df = pd.read_csv('codes_table.csv', dtype=object)
-#                try:
-#                    #code_df.to_csv('codes_table.csv')
-#                    code_df["code"].to_sql('codes_t', self.engine)
-#                except ValueError as e:
-#                    logger.info("Exception: %s",e)
-#                except Exception as e:
-#                    logger.info("Exception: %s",e)
-#            except Exception as e:
-#                logger.error("codes_table.csv does not exist")
-#        
-#    
-#    def saveCodes_fromCSV_toDB(self):
-#        try:
-#            codes_df = pd.read_csv('codes_table.csv', dtype='str')
-#            try:
-#                #code_df.to_csv('codes_table.csv')
-#                codes_df["code"].to_sql('codes_t', self.engine)
-#            except ValueError as e:
-#                logger.info("Exception: %s",e)
-#            except Exception as e:
-#                logger.info("Exception: %s",e)
-#        except Exception as e:
-#            logger.error("codes_table.csv does not exist")
-#        
-#    def saveLatestCodes_tocsv(self):
-#        date = datetime.now().strftime("%Y%m%d")
-##        date = '2018-10-17'
-#        sqlcmd_get_codes = "SELECT code FROM '%s'"%date
-#        try:
-#            r = self.engine.execute(sqlcmd_get_codes)
-#            code_df = pd.DataFrame(r.fetchall(), columns=['code'])
-#            code_df.to_csv('codes_table.csv')
-#            logger.debug("codes saves to cdoes_table.csv")
-##        except OperationalError as e:
-##            logger.warning("read %s from %s error: %s", date, self.sql_filename, e)
-#        except Exception as e:
-#            logger.warning("read %s from %s error: %s", date, self.sql_filename, e)
+
+class CVRatioModel(Sqlite3Handler):
+    """Cumulated Volume Ratio Choosing Stock"""
+    def __init__(self):
+        self.cvrStartDate = "20181010"
+        self.cvrEndDate = "20181110"
+        super(CVRatioModel, self).__init__('hfq')
+        self.cvrDays = 5
+        self.preCond = self.getInitPreCondData()
+        self.cond = self.getInitCondData()
+        self.cvrThreshold=80
+        self.cvrEndCond=self.getInitEndCondData()
+        self.cvrEndDayRange = 100
+        self.cvrEndDays=5
+        self.runCvrAllowed = True
+        
+        
+    def getInitPreCondData(self):
+        return {'Cbx':True, "MAdir":u'高于', "MAdays":'30', "DiffDir":u'至少', "DiffValue":'10'}
+    def getInitCondData(self):
+        return {'1': {'Cbx':True, "MAdir":u'高于', "MAdays":'5', "DiffDir":u'至少', "DiffValue":'10'},
+                    '2': {'Cbx':True, "MAdir":u'高于', "MAdays":'8', "DiffDir":u'至少', "DiffValue":'10'},
+                    '3': {'Cbx':False, "MAdir":u'高于', "MAdays":'60', "DiffDir":u'至少', "DiffValue":'10'},
+                    '4': {'Cbx':False, "MAdir":u'高于', "MAdays":'60', "DiffDir":u'至少', "DiffValue":'10'},
+                    '5': {'Cbx':False, "MAdir":u'高于', "MAdays":'60', "DiffDir":u'至少', "DiffValue":'10'},
+                    '6': {'Cbx':False, "MAdir":u'高于', "MAdays":'60', "DiffDir":u'至少', "DiffValue":'10'} }
+    def getInitEndCondData(self):
+        return {'Cbx':True, "MAdir":u'高于', "MAdays":'60', "DiffDir":u'至少', "DiffValue":'10'}
+    
+    def addMAvaluesToDF(self, df):
+        MAdays = []
+        MAdays.append(int(self.preCond['MAdays']))
+        MAdays.append(int(self.cvrEndCond['MAdays']))
+        for idx in self.cond:
+            MAdays.append(int(self.cond[idx]['MAdays']))
+        for maday in set(MAdays):
+            df['ma%s'%maday]= df.groupby('ts_code')['close'].apply(lambda x: x.rolling(maday).mean())
+    def cleanDFbyPreCond(self,df):
+        if (self.preCond['Cbx']==True):
+            preMAday = int(self.preCond["MAdays"])
+            preDiffValue = float(self.preCond["DiffValue"])/100
+            cvrDays = int(self.cvrDays)
+            df['pre']=(df['close']-df['ma%s'%preMAday]*(1+preDiffValue))>0
+            #移动和
+            df['pre']= df.groupby('ts_code')['pre'].apply(lambda x: x.rolling(cvrDays).sum())
+            #收盘价连续大于MA20 5天
+            df['pre']=df['pre']>=cvrDays
+            #将首次满足条件后的每一天都标注True
+            df['pre']= df.groupby('ts_code')['pre'].apply(lambda x: x.cumsum())
+            df['pre'] = df['pre']>0
+            # drop row with df['pre']==False, which are not satisfied preCond
+            df.drop(df.index[df['pre']==False], inplace=True)
+    def popDFbyEndCond(self, df):
+        if (self.cvrEndCond['Cbx']==True):
+            cvrEndDays = int(self.cvrEndDays)
+            cvrEndMAdays = int(self.cvrEndCond['MAdays'])
+            cvrEndDiffValue = float(self.cvrEndCond['DiffValue'])/100
+            #求移动平均
+            #df['end']= df.groupby('ts_code')['close'].apply(lambda x: x.rolling(cvrEndMAdays).mean())
+            df['end']=(df['close']-df['ma%s'%cvrEndMAdays]*(1-cvrEndDiffValue))<0
+            #移动和
+            df['end']= df.groupby('ts_code')['end'].apply(lambda x: x.rolling(cvrEndDays).sum())
+            #收盘价连续大于MA20 5天
+            df['end']=(df['end']>=cvrEndDays)
+            #将首次满足终止条件后的每一天都标注True
+            df['end']= df.groupby('ts_code')['end'].apply(lambda x: x.cumsum())
+            df['end'] = (df['end']>0)
+            # drop and reserved the data satisfied 'end' condition
+            df_tailed = df[df['end']==True].copy()
+            df.drop(df.index[df['end']==True], inplace=True)
+            return df_tailed
+        else:
+            # return empty dataframe
+            return pd.DataFrame()
+    def dropDFbyCond(self, df):
+        cvrDays = int(self.cvrDays)
+        for idx in self.cond:
+            if self.cond[idx]['Cbx']==True:
+                MAdays=int(self.cond[idx]['MAdays'])
+                DiffValue = float(self.cond[idx]['DiffValue'])/100
+                print("cond%s MAdays = %d"%(idx,MAdays))
+                #计算移动平均
+                #df['cond']= df.groupby('ts_code')['close'].apply(lambda x: x.rolling(MAdays).mean())
+                #选择Close > 移动平均
+                df['cond']=(df['close']-df['ma%s'%MAdays]*(1+DiffValue))>0
+                #df['cond'].to_csv(r'data/cond.csv', index=False)
+                #df['condFlag'].to_csv(r'data/condFlag.csv', index=False)
+                df['condFlag'] = df['condFlag'] & df['cond']
+                #df['condFlag'].to_csv(r'data/condFlag_rlt.csv', index=False)
+        #求移动和(连续M天True)
+        df['condFlag']= df.groupby('ts_code')['condFlag'].apply(lambda x: x.rolling(MAdays).sum())
+        df['condFlag']=df['condFlag']>=cvrDays
+        #将满足连续"M天Cond"之后的日期都标记为True
+        df['condFlag']= df.groupby('ts_code')['condFlag'].apply(lambda x: x.cumsum())
+        df['condFlag'] = df['condFlag']>0
+        #删除不满足条件的行
+        df.drop(df.index[df['condFlag']==False], inplace=True)
+    
+    def startCVR(self,df):
+        cvrThreshold = int(self.cvrThreshold )
+        #量能开始
+        rslt = pd.DataFrame(index=df.groupby('ts_code').first().index)
+        dfCodeDate = df.groupby('ts_code')['trade_date'].first()
+        #1st CV, start date 
+        rslt = pd.merge(rslt,dfCodeDate.to_frame(),how='inner', on=['ts_code'])
+        #量能结束        
+        df['cv']= df.groupby('ts_code')['turnover_rate'].apply(lambda x: x.cumsum())
+        df['cvflag']=df['cv']>=cvrThreshold
+        #df_reserved = df[df['cvflag']==False].copy()       #not used, drop
+        df.drop(df.index[df['cvflag']==False], inplace=True)
+        dfCodeDateCV = df.groupby('ts_code')['trade_date', 'cv'].first()
+        #第一次量能筛选结果, how=inner, start date is del if end data not exist
+        # 1st CV: startdate, end date, cv
+        rslt = pd.merge(rslt,dfCodeDateCV,how='inner',on=['ts_code'])
+        return rslt
+
+    def calcCVR(self):
+        starttime = time.time()
+
+        # start, init gauge
+        pub.sendMessage("pubMsg_CVRatioModel", msg=("startCVRBtn", None))   #set panel off, start gauge
+        pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", 5))
+        #1. data init. outside the loop.
+            #a. read all data from database, and sort by date
+            #b. calc all MA values
+        preMAday = int(self.preCond["MAdays"])
+        preDiffValue = float(self.preCond["DiffValue"])/100
+        cvrDays = int(self.cvrDays)
+        
+        
+        cmd="SELECT trade_date,ts_code, close, turnover_rate FROM hqall_t"
+        df=pd.read_sql_query(cmd, self.engine)
+
+        logger.debug("pd.read_sql_query: %s",  "%.2f"%(time.time()-starttime))
+        starttime = time.time()
+
+        #对时间排序
+        df = df.sort_values(by='trade_date', ascending=True)
+
+        logger.debug("df.sort_values: %s",  "%.2f"%(time.time()-starttime))
+        starttime = time.time()
+
+        #添加所有移动平均到DataFrame
+        self.addMAvaluesToDF(df)
+        ##df['pre']= df.groupby('ts_code')['close'].apply(lambda x: x.rolling(preMAday).mean())
+        
+        logger.debug("addMAvaluesToDF: %s",  "%.2f"%(time.time()-starttime))
+        starttime = time.time()
+
+        #init 'condflag' column to True
+        df['condFlag']=True
+        #最终结果
+        finalRslt = pd.DataFrame(index=df.groupby('ts_code').first().index)
+        #满足量能次数
+        cvrRltIdx=0
+        while (not df.empty):
+            cvrRltIdx+=1
+            df = df.sort_values(by='trade_date', ascending=True)
+
+            logger.debug("df.sort_values: %s",  "%.2f"%(time.time()-starttime))
+            starttime = time.time()
+
+            #2. 1st loop, calc preCond, 
+            self.cleanDFbyPreCond(df)
+
+            logger.debug("cleanDFbyPreCond: %s",  "%.2f"%(time.time()-starttime))
+            starttime = time.time()
+
+            df_tailed = self.popDFbyEndCond(df)
+
+            logger.debug("popDFbyEndCond: %s",  "%.2f"%(time.time()-starttime))
+            starttime = time.time()
+
+            #3. 2nd loop the "cond1-cond7", calc cond
+            self.dropDFbyCond(df)
+            
+            logger.debug("dropDFbyCond: %s",  "%.2f"%(time.time()-starttime))
+            starttime = time.time()
+
+            #4. start caculation CV
+            rslt = self.startCVR(df)
+
+            logger.debug("startCVR: %s",  "%.2f"%(time.time()-starttime))
+            starttime = time.time()
+            ##量能开始
+            #rslt = pd.DataFrame(index=df.groupby('ts_code').first().index)
+            #dfCodeDate = df.groupby('ts_code')['trade_date'].first()
+            ##1st CV, start date 
+            #rslt = pd.merge(rslt,dfCodeDate.to_frame(),how='inner', on=['ts_code'])
+
+            ##量能结束        
+            #df['cv']= df.groupby('ts_code')['turnover_rate'].apply(lambda x: x.cumsum())
+            #df['cvflag']=df['cv']>=cvrThreshold
+            #df_reserved = df[df['cvflag']==False].copy()
+            #df.drop(df.index[df['cvflag']==False], inplace=True)
+            #dfCodeDateCV = df.groupby('ts_code')['trade_date', 'cv'].first()
+            ##第一次量能筛选结果, how=inner, start date is del if end data not exist
+            ## 1st CV: end date, cv
+            #rslt = pd.merge(rslt,dfCodeDateCV,how='inner',on=['ts_code'])
+            
+            #rslt.rename(columns={'A':'a', 'B':'b', 'C':'c'}, inplace = True)
+            #print(rslt)
+
+
+            #最终结果
+            if finalRslt.empty==True:
+                howPara='inner'
+                # add code column to DF
+                finalRslt['ts_code']=finalRslt.index
+            else:
+                howPara='left'
+            if (not rslt.empty):
+                rslt.columns = [u'第%s次开始'%cvrRltIdx, u'第%s次结束'%cvrRltIdx, u'第%s次量能'%cvrRltIdx]
+                finalRslt = pd.merge(finalRslt,rslt,how=howPara, on=['ts_code'])
+            print(finalRslt)
+            # resume dropped data, for next preCond detect
+
+            print("length of df is %d, before attend"%len(df))
+            if (not df_tailed.empty):
+                df = df.append(df_tailed, sort=False)
+            print("length of df is %d, after attend"%len(df))
+            logger.debug("finalRslt: %s",  "%.2f"%(time.time()-starttime))
+            starttime = time.time()        
+        #finalRslt.to_csv(r'data/finalRslt.csv', index=False, encoding='utf_8_sig')
+        
+
+        #for i in range(10):
+        #    if self.runCvrAllowed:
+        #        time.sleep(1)
+        #        pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", i*10))
+        #    else:
+        #        break
+        pub.sendMessage("pubMsg_CVRatioModel", msg=("endCVRBtn", None))
     
 
         
@@ -1152,5 +1327,22 @@ df = ts.pro_bar(pro_api=api, ts_code='000001.SZ', adj='qfq', start_date='2016010
  df4 = pd.merge(df2,df1,on=['ts_code','trade_date'])
  df5 = pd.merge(df4,df3,on=['ts_code','trade_date'])
  df5['weighted_close']=(df5['close']*df5['adj_factor']).round(2)
+ ++++++++++++++++++
 
+engine = create_engine('sqlite+pysqlite:///nfq_hqData.db', module=sqlite) 
+engine = create_engine('sqlite+pysqlite:///hfq_hqData.db', module=sqlite)
+cmd="SELECT trade_date,ts_code, close, turnover_rate FROM hqall_t"
+df=pd.read_sql_query(cmd, engine)
+#对时间排序
+df = df.sort_values(by='trade_date', ascending=True)
+#求移动平均
+df['ma30']= df.groupby('ts_code')['close'].apply(lambda x: x.rolling(30).mean())
+df['diff']=(df['close']-df['ma30']*1.1)>0
+#移动和
+df['A']= df.groupby('ts_code')['diff'].apply(lambda x: x.rolling(5).sum())
+df['B']=df['A']>4
+#收盘价连续大于MA20 5天
+df['C']= df.groupby('ts_code')['B'].apply(lambda x: x.cumsum())
+#保存000001.SZ到csv
+df[df['ts_code']=='000001.SZ'].to_csv('000001.csv', index=False)
 '''
