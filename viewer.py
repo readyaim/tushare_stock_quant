@@ -358,10 +358,10 @@ class RPSLeftPanel(wx.Panel):
         vsizer.AddSpacer(4)
         
         name = 'rpsInitBtn'
-        self.startRPSbuttons = wx.Button(self, -1, "RPS Init", name=name)        # add buttons
+        self.startRPSbuttons = wx.Button(self, -1, "update RPS", name=name)        # add buttons
         self.rpsTextLabelFields[name]=self.startRPSbuttons
         self.Bind(wx.EVT_BUTTON, self.Evt_RPSDataInitButton, self.startRPSbuttons) 
-        self.startRPSbuttons.Disable()
+#        self.startRPSbuttons.Disable()
         vsizer.Add(self.startRPSbuttons)
         
         staticsizer.AddSpacer(10)
@@ -422,7 +422,7 @@ class RPSLeftPanel(wx.Panel):
     def setRPSPanelOn(self):
         for label in self.rpsTextLabelFields:
             self.rpsTextLabelFields[label].Enable()
-        self.startRPSbuttons.Disable()
+#        self.startRPSbuttons.Disable()
         
         if (not self.rpsTextLabelFields["nmRpsCbxPctRank"].GetValue()):
             self.rpsTextLabelFields["nmRpsEndDate"].Disable()
@@ -435,9 +435,11 @@ class RPSLeftPanel(wx.Panel):
         logger.debug("set auType to '%s'"%autype)
     def setRPSbutton(self, status):
         if (status == True):
-            self.startRPSbuttons.Enable()
+#            self.startRPSbuttons.Enable()
+            self.startRPSbuttons.SetLabel('Re-Calc All')
         else:
-            self.startRPSbuttons.Disable()
+#            self.startRPSbuttons.Disable()
+            self.startRPSbuttons.SetLabel('update RPS')
     def setRpsEndDate(self, status):
         if (status == True):
             self.rpsTextLabelFields["nmRpsEndDate"].Enable()
@@ -2030,6 +2032,11 @@ class Controller_RPS(object):
                 logger.debug("rpsNList =%s", self.model.rpsNList)
             if (msg[0]=="nmRpsInitCbx"):
                 self.view.setRPSbutton(msg[1])
+                # re-map the function
+                if (msg[1] == True):
+                    self.model.pFuncCalcRPS = self.model.calcAllRPS
+                else:
+                    self.model.pFuncCalcRPS = self.model.calcNewAddedRPS
             if (msg[0]=="nmRpsCbxPctRank"):
                 self.view.setRpsNwindow(msg[1])
                 self.view.setRpsEndDate(msg[1])
@@ -2052,7 +2059,7 @@ class Controller_RPS(object):
             self.view.setRPSPanelOff()
             logger.debug("pubMsg_RPSLeftPanel: start RPS Data Init")
             #update button pressed, to start, from viewer
-            t = threading.Thread(target=self.model.calcNewAddedRPS, args=())
+            t = threading.Thread(target=self.model.pFuncCalcRPS, args=())
             #t = threading.Thread(target=self.model.calcAllRPS, args=())
             t.setDaemon(True)   #非重要线程
             t.start()
@@ -2097,6 +2104,8 @@ class Controller_RPS(object):
         elif isinstance(msg, str):
             if msg == "end_calcAllRPS":
                 self.view.setRPSPanelOn()
+                self.view.rpsTextLabelFields['rpsInitBtn'].SetLabel('Update RPS')
+                self.model.pFuncCalcRPS = self.model.calcNewAddedRPS
                 #self.view.setStartButtonLabel(u'开始')   #for toggle button
             if msg =="end_getRPSbyDate":
                 self.view.setRPSPanelOn()
