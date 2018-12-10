@@ -259,21 +259,25 @@ class Sqlite3Handler(object):
         else:
             return pd.DataFrame()
     
-    def getAllDataFromTables(self, cmd):
-        table1 = 'hqall_t'
-        table2 = 'rawdata_t'
-        df1 = self.getDataFromOneTableByCmd(table1, cmd)
-        df2 = self.getDataFromOneTableByCmd(table2, cmd)
-        df = pd.concat([df1, df2], ignore_index=True, sort = False)
+    def getAllDataFromTables(self, cmds):
+        df = pd.DataFrame()
+        for key in cmds:
+            df1 = self.getDataFromOneTableByCmd(key, cmds[key])
+            if not df1.empty:
+                df = pd.concat([df, df1], ignore_index=True, sort = False)
         return df
     def getDataByCode(self, tscode):
         logger.debug("run getDatabyCode: %s"%tscode)
         params = (tscode,)
-        cmd="SELECT * FROM %s WHERE ts_code = ? "%(self.tablenm_hqall)
+        cmd1="SELECT * FROM %s WHERE ts_code = '%s' "%(self.tablenm_hqall, tscode)
+        cmd2="SELECT * FROM %s WHERE ts_code = '%s' "%(self.tablenm_rawdata, tscode)
+        cmds = {self.tablenm_hqall: cmd1, self.tablenm_rawdata:cmd2}
+        
 #        params = ('ts_code','trade_date','open','high','low','close','vol','turnover_rate','turnover_rate_f','weighted_close')
 #        cmd="SELECT ?,?,?,?,?,?,?,?,?,? FROM %s WHERE ts_code = %s "%(self.tablenm_hqall, tscode)
         try:
-            df=pd.read_sql_query(cmd, self.engine, params= params)
+#            df=pd.read_sql_query(cmd, self.engine, params= params)
+            df=self.getAllDataFromTables(cmds)
             
         except Exception as e:
             logger.error("read data by ts_code from %s error", self.tablenm_hqall)
