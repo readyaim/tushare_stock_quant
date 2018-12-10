@@ -108,6 +108,7 @@ def log_memory_usage(func):
         startMemUsage = psutil.Process(os.getpid()).memory_info().rss
         start = time.time()
         func(*args, **kwargs)
+        logger.debug("Caculation is finished!! Time used: %.2fs",(time.time()-start))
         endMemUsage = psutil.Process(os.getpid()).memory_info().rss
         logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
                                  format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
@@ -616,7 +617,7 @@ class CalcRPS_Model(Sqlite3Handler):
             self.updateMaxDateInDB(self.getMaxDateInDB())
             counter = 100
             pub.sendMessage("pubMsg_CalcRPS_Model", msg=("nmRpsGauage", counter))
-            logger.debug("Caculation is finished!! Time used: %.2fs",(time.time()-start))
+#            logger.debug("Caculation is finished!! Time used: %.2fs",(time.time()-start))
 #            endMemUsage = psutil.Process(os.getpid()).memory_info().rss
 #            logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
 #                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
