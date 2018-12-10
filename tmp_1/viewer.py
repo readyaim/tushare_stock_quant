@@ -15,8 +15,7 @@ from datetime import datetime, timedelta
 from time import ctime, sleep
 import threading
 from random import randint
-#from queue import Queue
-from multiprocessing import Process, Queue
+from queue import Queue
 import logging
 #from socket import *
 #from twisted.internet import reactor
@@ -52,6 +51,7 @@ import matplotlib.ticker as ticker
 #import json
 
 import tushare as ts
+api = ts.pro_api('ded43ecfd7bc26fa6938e63d9578d44d00fba560859a900654b46687')
 from sqlite3 import dbapi2 as sqlite
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.sqlite import TIME, DATE, DATETIME
@@ -309,7 +309,7 @@ class RPSLeftPanel(wx.Panel):
 #        pctRandSizer = self.buildPctRankBar()
 #        mainsizer.Add(pctRandSizer, 0,  wx.ALL | wx.EXPAND)  
         
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         self.SetSizer(mainsizer)
         self.Show()
         self.SetDoubleBuffered(True)    #to avoid flickering of text
@@ -799,7 +799,7 @@ class RPSFrontPanel(wx.Panel):
 #        mainsplitter.SetMinimumPaneSize(0)
         mainSizer = wx.BoxSizer(wx.VERTICAL)
         mainSizer.Add(mainsplitter, 1, wx.EXPAND | wx.ALL)
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         self.SetSizer(mainSizer)
         self.Fit()
         self.Show()
@@ -837,7 +837,7 @@ class CVRLeftPanel(wx.Panel, CommonPanelMethod):
         sizer = self.buildCvrStartBar()
         mainsizer.Add(sizer)
         
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         self.SetSizer(mainsizer)
         mainsizer.Fit(self)
         self.Fit()
@@ -996,8 +996,6 @@ class CVRLeftPanel(wx.Panel, CommonPanelMethod):
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         for ChooseCondDayItem in self.creatAmErgStartData():
             self.createOneAmtErg(sizer, ChooseCondDayItem)
-        self.buildOneSpinCtrl(sizer, list(self.buildChooseDaysData()))
-
         return sizer
     def buildEndCondBar(self):
         box = wx.StaticBox(self, -1, u"终止条件")
@@ -1163,20 +1161,6 @@ class CVRLeftPanel(wx.Panel, CommonPanelMethod):
         self.buildGauge(sizer)
         return sizer
 
-    def buildChooseDaysData(self):
-        #for label, initvalue, eHandler,name in [dataItem]:
-        return (u", 显示天数", 120, self.EvtRetNameValue, "nmCvrDisplayDay")
-
-    def buildOneSpinCtrl(self, sizer, dataItem):
-        for label, initvalue, eHandler,name in [dataItem]:
-            text = wx.StaticText(self, label=label)
-            sizer.Add(text, 0, wx.ALL, 2)
-            sc = wx.SpinCtrl(self, size=(60,-1), name=name)
-            sc.SetRange(1,10000)
-            #sc.SetValue(initvalue)
-            self.CVRpanelWidgets[name] = sc
-            self.Bind(wx.EVT_TEXT, eHandler, sc)
-            sizer.Add(sc, 0, wx.ALL, 2)
     
 class CVRrightPanel(wx.Panel):
     def __init__(self, parent):
@@ -1187,17 +1171,17 @@ class CVRrightPanel(wx.Panel):
         self.mainsplitter.SetOrientation(wx.VERTICAL)
         self.mainsplitter.AppendWindow(self.splitterpanel1, -1)
         self.mainsplitter.AppendWindow(self.splitterpanel2, -1)
-        self.mainsplitter.SetSashPosition(0, 398)
+        self.mainsplitter.SetSashPosition(0, 298)
         mainsizer = wx.BoxSizer(wx.VERTICAL)
         mainsizer.Add(self.mainsplitter, 1, wx.EXPAND | wx.ALL)
 #        mainSizer.Add(mainsplitter, 0, wx.ALL)
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("light grey")
         self.SetSizer(mainsizer)
         self.Fit()
         self.Show()
         #self.SetDoubleBuffered(True)
         self.num=0
-        self.sashpositionValue = [399,400]
+        self.sashpositionValue = [299,300]
     def updateSashPosition(self):
         """ workaround for scroller bar:
          A bug is in Scroller bar, it is not working normally after re-writing table in RPSRightUpPanel.
@@ -1412,7 +1396,7 @@ class RPSRightDownPanel(wx.Panel):
 #        self.BoxSizer.Add(self.MPL,flag = wx.ALL | wx.EXPAND)  
         self.BoxSizer.Add(self.MPL, proportion =-1, border = 0,flag = wx.ALL | wx.EXPAND)  
 #        self.BoxSizer.Add(self.CVRrightPanel,proportion =0, border = 2,flag = wx.ALL | wx.EXPAND)  
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         self.SetSizer(self.BoxSizer)
         self.Fit()
         #MPL_Frame界面居中显示  
@@ -1605,7 +1589,7 @@ class RPSRightPanel(wx.Panel):
         self.mainsizer = wx.BoxSizer(wx.VERTICAL)
         self.mainsizer.Add(self.mainsplitter, 1, wx.EXPAND | wx.ALL)
 #        mainSizer.Add(mainsplitter, 0, wx.ALL)
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("light grey")
         self.SetSizer(self.mainsizer)
         self.Fit()
 #        self.SetDoubleBuffered(True)
@@ -1637,7 +1621,7 @@ class CVRightDownPanel(wx.Panel):
         self.BoxSizer=wx.BoxSizer(wx.VERTICAL)  
         self.BoxSizer.AddSpacer(5)
         self.BoxSizer.Add(self.MPL, proportion =-1, border = 0,flag = wx.ALL | wx.EXPAND)  
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         self.SetSizer(self.BoxSizer)
         self.Fit()
         self.Centre(wx.BOTH)  
@@ -1659,13 +1643,7 @@ class CVRightDownPanel(wx.Panel):
 
         self.ax1.cla()
         
-        mpf.candlestick_ochl(self.ax1, mat_df, width=0.6, colorup='r', colordown='g', alpha=1.0)    #, label =df.loc[0,'ts_code'] )
-        self.ax1.plot(df['ma5'],'-', label='ma5', linewidth = '1')
-        self.ax1.plot(df['ma30'],'-', label='ma30', linewidth = '1')
-        self.ax1.plot(df['ma60'],'-', label='ma60', linewidth = '1')
-        handles, labels = self.ax1.get_legend_handles_labels()
-        
-        self.ax1.legend(handles[::-1], labels[::-1], loc = 'lower left', fontsize = 'x-small')  #loc='best', fontsize = 'x-small')
+        mpf.candlestick_ochl(self.ax1, mat_df, width=0.6, colorup='r', colordown='g', alpha=1.0)
 #        self.ax1.xaxis.set_major_locator(ticker.MultipleLocator(6))
         self.ax1.xaxis.set_major_formatter(ticker.FuncFormatter(format_date))
         self.ax1.grid(True)
@@ -1729,7 +1707,7 @@ class CVRatioPanel(wx.Panel):
 #        mainsplitter.SetMinimumPaneSize(0)
         mainSizer = wx.BoxSizer(wx.VERTICAL)
         mainSizer.Add(mainsplitter, 1, wx.EXPAND | wx.ALL)
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         self.SetSizer(mainSizer)
         self.Fit()
         #self.Refresh()
@@ -1758,7 +1736,7 @@ class MyFrame(wx.Frame):
         nb.AddPage(page3, "RPS")
         # finally, put the notebook in a sizer for the panel to manage
         # the layout
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         sizer = wx.BoxSizer()
         sizer.Add(nb, 1, wx.ALL|wx.EXPAND)
         
@@ -1850,7 +1828,7 @@ class Viewer(wx.Frame):
         nb.SetSelection(0)
         # finally, put the notebook in a sizer for the panel to manage
         # the layout
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("white")
         sizer = wx.BoxSizer()
         sizer.Add(nb, 1, wx.ALL|wx.EXPAND)
         
@@ -2044,17 +2022,13 @@ class Controller_RPS(object):
             logger.debug("pubMsg_RPSLeftPanel: get RPS")
             #update button pressed, to start, from viewer
             t = threading.Thread(target=self.model.getRPSbyDate, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
-
     def worker_rpsDataInitButton(self, para):
         if (para == 'rpsInitBtn'):
             self.view.setRPSPanelOff()
             logger.debug("pubMsg_RPSLeftPanel: start RPS Data Init")
             #update button pressed, to start, from viewer
-            t = threading.Thread(target=self.model.calcNewAddedRPS, args=())
-            #t = threading.Thread(target=self.model.calcAllRPS, args=())
-            t.setDaemon(True)   #非重要线程
+            t = threading.Thread(target=self.model.calcAllRPS, args=())
             t.start()
 
     def worker_rpsStartTglButton(self, para):
@@ -2065,7 +2039,6 @@ class Controller_RPS(object):
             logger.debug("pubMsg_RPSLeftPanel: start RPS update")
             #update button pressed, to start, from viewer
             t = threading.Thread(target=self.model.calcAllRPS, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
         elif (para ==False):
             self.model.onoff=0
@@ -2119,7 +2092,6 @@ class Controller_CVRatio(object):
         self.view.setValueByName("nmCVRatioThreshold", self.model.cvrThreshold)
         self.view.setValueByName("nmCvrEndDayRange", self.model.cvrEndDayRange)
         self.view.setValueByName("nmEndDays", self.model.cvrEndDays)
-        self.view.setValueByName("nmCvrDisplayDay", self.model.cvrDisplayDay)
         self.viewRight = viewRight
 
         ##Disable CondBar
@@ -2148,9 +2120,6 @@ class Controller_CVRatio(object):
             elif (name =="nmCvrEndDate"):
                 self.model.cvrEndDate = para
                 logger.debug("set cvrEndDate = %s", self.model.cvrEndDate)
-            elif (name =="nmCvrDisplayDay"):
-                self.model.cvrDisplayDay = para
-                logger.debug("set cvrDisplayDay = %s", self.model.cvrDisplayDay)
             elif (name =="nmCvrDays"):
                 self.model.cvrDays = para
                 logger.debug("set cvrDays = %s", self.model.cvrDays)
@@ -2222,7 +2191,6 @@ class Controller_CVRatio(object):
             logger.debug("pubMsg_CVRatioModel: start CVR")
             #update button pressed, to start, from viewer
             t = threading.Thread(target=self.model.calcCVR, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
         elif (para ==False):
             self.model.runCvrAllowed=False
@@ -2302,7 +2270,6 @@ class Controller_dnldData(object):
             #update button pressed, to start, from viewer
             #t = threading.Thread(target=self.model.updateHQdata, args=())
             t = threading.Thread(target=self.model.updateHQdataByDate, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
         elif (para ==False):
             self.model.HQonoff=0
@@ -2316,28 +2283,27 @@ class Controller_dnldData(object):
             days_num = int(days)
         except Exception as e:
             logger.warn(e)
-        #start_date=self.get_startdate_byworkday(self.model.end_date, days_num)
-        start_date=self.model.get_startdate_byworkday(self.model.end_date, days_num)
+        start_date=self.get_startdate_byworkday(self.model.end_date, days_num)
         self.model.start_date = start_date
         self.view.setStartDate(start_date)
         logger.debug("work days changed, = %d", days)
         logger.debug("start date changed, = %s", self.model.start_date)
             
-    #def get_startdate_byworkday(self,end_date_str, numofdays):
-    #    end_date = datetime.strptime(end_date_str, "%Y%m%d")
-    #    if end_date.isoweekday() in [6,7]:
-    #        preDate = end_date-timedelta(end_date.isoweekday()-5)
-    #    else:
-    #        preDate = end_date
-    #    while (numofdays>1):
-    #        if (preDate.isoweekday() not in [6,7]):
-    #            numofdays-=1
-    #            preDate = preDate-timedelta(days=1)
-    #        else:
-    #            preDate = preDate-timedelta(days=1)
-    #    while(preDate.isoweekday() in [6,7]):
-    #        preDate = preDate-timedelta(days=1)
-    #    return preDate.strftime("%Y%m%d")
+    def get_startdate_byworkday(self,end_date_str, numofdays):
+        end_date = datetime.strptime(end_date_str, "%Y%m%d")
+        if end_date.isoweekday() in [6,7]:
+            preDate = end_date-timedelta(end_date.isoweekday()-5)
+        else:
+            preDate = end_date
+        while (numofdays>1):
+            if (preDate.isoweekday() not in [6,7]):
+                numofdays-=1
+                preDate = preDate-timedelta(days=1)
+            else:
+                preDate = preDate-timedelta(days=1)
+        while(preDate.isoweekday() in [6,7]):
+            preDate = preDate-timedelta(days=1)
+        return preDate.strftime("%Y%m%d")
 
 
 class DnldHQDataPanel(wx.Panel):
@@ -2349,7 +2315,7 @@ class DnldHQDataPanel(wx.Panel):
         #self.autypeStr = 'nfq'         #不复权
         #self.days_num = ''
                 
-        
+        self.SetBackgroundColour("white")
         startY=0
         startX=0
         
@@ -2408,7 +2374,7 @@ class DnldHQDataPanel(wx.Panel):
         self.gauge.Hide()
 
         #pub.subscribe(self.updateDisplay, "update")
-        self.SetBackgroundColour("whitesmoke")
+        self.SetBackgroundColour("grey")
         self.SetDoubleBuffered(True)        
 #        self.Refresh()
 

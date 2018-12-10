@@ -2044,7 +2044,6 @@ class Controller_RPS(object):
             logger.debug("pubMsg_RPSLeftPanel: get RPS")
             #update button pressed, to start, from viewer
             t = threading.Thread(target=self.model.getRPSbyDate, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
 
     def worker_rpsDataInitButton(self, para):
@@ -2052,9 +2051,7 @@ class Controller_RPS(object):
             self.view.setRPSPanelOff()
             logger.debug("pubMsg_RPSLeftPanel: start RPS Data Init")
             #update button pressed, to start, from viewer
-            t = threading.Thread(target=self.model.calcNewAddedRPS, args=())
-            #t = threading.Thread(target=self.model.calcAllRPS, args=())
-            t.setDaemon(True)   #非重要线程
+            t = threading.Thread(target=self.model.calcAllRPS, args=())
             t.start()
 
     def worker_rpsStartTglButton(self, para):
@@ -2065,7 +2062,6 @@ class Controller_RPS(object):
             logger.debug("pubMsg_RPSLeftPanel: start RPS update")
             #update button pressed, to start, from viewer
             t = threading.Thread(target=self.model.calcAllRPS, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
         elif (para ==False):
             self.model.onoff=0
@@ -2222,7 +2218,6 @@ class Controller_CVRatio(object):
             logger.debug("pubMsg_CVRatioModel: start CVR")
             #update button pressed, to start, from viewer
             t = threading.Thread(target=self.model.calcCVR, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
         elif (para ==False):
             self.model.runCvrAllowed=False
@@ -2302,7 +2297,6 @@ class Controller_dnldData(object):
             #update button pressed, to start, from viewer
             #t = threading.Thread(target=self.model.updateHQdata, args=())
             t = threading.Thread(target=self.model.updateHQdataByDate, args=())
-            t.setDaemon(True)   #非重要线程
             t.start()
         elif (para ==False):
             self.model.HQonoff=0
