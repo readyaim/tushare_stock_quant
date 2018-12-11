@@ -152,6 +152,37 @@ class Sqlite3Handler(object):
         self.tablenm_hqall='hqall_t'
         self.date_tail = '00:00:00.000000'
         self.tablenm_rawdata = 'rawdata_t'
+        self.holidayDateStrs = ['20181005', '20181004', '20181003', '20181002', '20181001', \
+                         '20180924', '20180618', '20180501', '20180430', '20180406', \
+                         '20180405', '20180221', '20180220', '20180219', '20180216', \
+                         '20180215', '20180105', '20180104', '20180103', '20180101', \
+                         '20171006', '20171005', '20171004', '20171003', '20171002', \
+                         '20170530', '20170529', '20170501', '20170404', '20170403', \
+                         '20170202', '20170201', '20170131', '20170130', '20170127', \
+                         '20170102']
+
+    def isHoliday(self, targetdate):
+        if targetdate.isoweekday() in [6,7]:
+            return True
+        dateStr = targetdate.strftime("%Y%m%d")
+        if dateStr in self.holidayDateStrs:
+            return True
+        else:
+            return False
+            
+    def get_startdate_byworkday(self, eDateStr, forwardays):
+        eDate = datetime.strptime(eDateStr, "%Y%m%d")
+        step = 1 if forwardays>=0 else -1
+        while (self.isHoliday(eDate)):
+            eDate = eDate-timedelta(step)
+        # init 
+        dayCounter = 0
+    #    eDate = eDate-timedelta(1)
+        while (dayCounter< abs(forwardays)):
+            if (not self.isHoliday(eDate)):
+                dayCounter+=1
+            eDate = eDate-timedelta(step)
+        return eDate.strftime("%Y%m%d")
 
     def updateMaxDateInDB(self, dateRange):
         maxDateStr, minDateStr = dateRange
@@ -183,6 +214,12 @@ class Sqlite3Handler(object):
         #minDate = self.engine.execute(cmd).fetchone()[0]
         return maxDate
 
+    def readMinDateInAttr_t(self):
+        cmd = "SELECT mindate FROM %s "%('attr_t')
+        minDate = self.engine.execute(cmd).fetchone()[0]
+        #cmd = "SELECT mindate FROM %s "%('attr_t')
+        #minDate = self.engine.execute(cmd).fetchone()[0]
+        return minDate
     def getMaxDateInDB(self):
         if self.checkTableExists(self.tablenm_hqall):
             #TODO: get code from database, not use '000001.SZ'
@@ -323,21 +360,21 @@ class Sqlite3Handler(object):
             logger.debug('Error, database read data error, len = %d', len(df))
             pub.sendMessage(self.pubMsg_Source, msg="end_getDataByCode")     
 
-    def get_startdate_byworkday(self,end_date_str, numofdays):
-        end_date = datetime.strptime(end_date_str, "%Y%m%d")
-        if end_date.isoweekday() in [6,7]:
-            preDate = end_date-timedelta(end_date.isoweekday()-5)
-        else:
-            preDate = end_date
-        while (numofdays>1):
-            if (preDate.isoweekday() not in [6,7]):
-                numofdays-=1
-                preDate = preDate-timedelta(days=1)
-            else:
-                preDate = preDate-timedelta(days=1)
-        while(preDate.isoweekday() in [6,7]):
-            preDate = preDate-timedelta(days=1)
-        return preDate.strftime("%Y%m%d")
+#    def get_startdate_byworkday(self,end_date_str, numofdays):
+#        end_date = datetime.strptime(end_date_str, "%Y%m%d")
+#        if end_date.isoweekday() in [6,7]:
+#            preDate = end_date-timedelta(end_date.isoweekday()-5)
+#        else:
+#            preDate = end_date
+#        while (numofdays>1):
+#            if (preDate.isoweekday() not in [6,7]):
+#                numofdays-=1
+#                preDate = preDate-timedelta(days=1)
+#            else:
+#                preDate = preDate-timedelta(days=1)
+#        while(preDate.isoweekday() in [6,7]):
+#            preDate = preDate-timedelta(days=1)
+#        return preDate.strftime("%Y%m%d")
 class CalcRPS_Model(Sqlite3Handler):
     
     def __init__(self):
@@ -626,16 +663,17 @@ class CalcRPS_Model(Sqlite3Handler):
         else:
             logger.debug("No new data to calculate")
             pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
-
+    
+    @log_memory_usage
     def calcAllRPS(self):
         '''Read out all data from sql database, transfer, and generate 'pctN' and 'rpsN' two columns.
         Then write back to database
         '''
         counter = 10
         pub.sendMessage("pubMsg_CalcRPS_Model", msg=("nmRpsGauage", counter))
-        memInfo = psutil.virtual_memory()
-        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
-        start = time.time()
+#        memInfo = psutil.virtual_memory()
+#        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#        start = time.time()
         #self.rpsN = '20'        #TODO: this is only for debug, should be removed in formal useage
         logger.debug("calculation RPS start!")
         logger.debug("database =%s", self.sql_filename)
@@ -643,15 +681,20 @@ class CalcRPS_Model(Sqlite3Handler):
         #self.createColumnIfnotExist()
         if self.rpsN not in self.rpsNChoices:
             self.rpsNChoices.append(self.rpsN)
-        pct_nm = 'pct%s'%self.rpsN
-        rps_nm = 'rps%s'%self.rpsN
-        rpsN = int(self.rpsN)
-        cmd="SELECT * FROM %s"%self.tablenm_hqall
+#        pct_nm = 'pct%s'%self.rpsN
+#        rps_nm = 'rps%s'%self.rpsN
+#        rpsN = int(self.rpsN)
+#        cmd="SELECT * FROM %s"%self.tablenm_hqall
         #params = ('ts_code', 'trade_date', 'weighted_close')
         #cmd="SELECT ?,?,? FROM %s"%self.tablenm_hqall
-        logger.debug("sql cmd: %s", cmd)
+#        logger.debug("sql cmd: %s", cmd)
+        cmd1="SELECT * FROM %s"%(self.tablenm_hqall)
+        cmd2="SELECT * FROM %s"%(self.tablenm_rawdata)
+        cmds = {self.tablenm_hqall: cmd1, self.tablenm_rawdata:cmd2}
+        
         try:
-            df=pd.read_sql_query(cmd, self.engine)
+#            df=pd.read_sql_query(cmd, self.engine)
+            df=self.getAllDataFromTables(cmds)
 #            df = pd.read_sql_table('hqall_t', self.engine)
             #df=pd.read_sql_query(cmd, self.engine, params = params)
             counter += 10
@@ -669,7 +712,8 @@ class CalcRPS_Model(Sqlite3Handler):
         else:    
             logger.debug('read data from base to dataframe success! len = %d', len(df))
             try:
-                df = df.groupby('ts_code').apply(lambda x: x.sort_values(by='trade_date', ascending=False))
+#                df = df.groupby('ts_code').apply(lambda x: x.sort_values(by='trade_date', ascending=False))
+                df = df.sort_values(by='trade_date', ascending=False)
                 for rpsNstr in self.rpsNChoices:
                     rps_nm = 'rps%s'%rpsNstr
                     pct_nm = 'pct%s'%rpsNstr
@@ -702,12 +746,12 @@ class CalcRPS_Model(Sqlite3Handler):
             except Exception as e:
                 logger.error(e)
                 
-            logger.debug("Caculation for %s is finished!! Time used: %.2fs",rps_nm,(time.time()-start))
-            
-            endMemUsage = psutil.Process(os.getpid()).memory_info().rss
-            logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
-                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
-            gc.collect()
+#            logger.debug("Caculation for %s is finished!! Time used: %.2fs",rps_nm,(time.time()-start))
+#            
+#            endMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#            logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
+#                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
+#            gc.collect()
             #close engine
            # self.engine.dispose()   
 #            conn.commit()
@@ -806,6 +850,8 @@ class DnldHQDataModel(Sqlite3Handler):
         que.put((ts_date, df))
         logger.debug("download thread: put %s to queue",ts_date)
         return True
+
+    @log_memory_usage
     def updateHQdataByDate(self):
         #启动save sqlite3线程
         self.enableQue = True
@@ -814,9 +860,9 @@ class DnldHQDataModel(Sqlite3Handler):
         t.start()
 
         #TODO: can be added to deco
-        start = time.time()
-        memInfo = psutil.virtual_memory()
-        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#        start = time.time()
+#        memInfo = psutil.virtual_memory()
+#        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
         # TODO end
         #pro = ts.pro_api('03ccb16bb841e50fb10cdcdcc53bf6bd13fab450d4b8f872b66744d1')
         pub.sendMessage("pubMsg_DnldHQDataModel", msg="disableMenu")
@@ -839,6 +885,7 @@ class DnldHQDataModel(Sqlite3Handler):
         self.buildAttrTableIfNotExist()
         maxDateStr = self.readMaxDateInAttr_t()
         logger.debug("maxDateStr = %s", maxDateStr)
+        logger.debug("minDateStr = %s", self.readMinDateInAttr_t())
         for ts_date in ts_dates:
             gaugeCounter += gaugeStep
             #print(ts_date)
@@ -880,11 +927,11 @@ class DnldHQDataModel(Sqlite3Handler):
             pass
         self.enableQue = False
         self.updateMaxDateInDB(self.getMaxDateInDB())
-        logger.debug("Time used: %.2fs. Download %d days data",(time.time()-start), len(ts_dates))
-        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
-        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
-                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
-        gc.collect()      
+#        logger.debug("Time used: %.2fs. Download %d days data",(time.time()-start), len(ts_dates))
+#        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
+#                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
+#        gc.collect()      
         pub.sendMessage("pubMsg_DnldHQDataModel", msg="endHQupdate")
         
         return True
@@ -1207,11 +1254,13 @@ class CVRatioModel(Sqlite3Handler):
             return df
         else:
             return pd.DataFrame()
+    
+    @log_memory_usage
     def calcCVR(self):
         #时间 内存统计
-        begintime = time.time()
-        memInfo = psutil.virtual_memory()
-        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#        begintime = time.time()
+#        memInfo = psutil.virtual_memory()
+#        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
 
         starttime = time.time()
         self.gauagecounter = 5
@@ -1294,11 +1343,15 @@ class CVRatioModel(Sqlite3Handler):
 
             #最终结果
             if (not rslt.empty):
+                print("show cvrRltIdx result:")
+                print(rslt)
                 rslt.columns = ['ts_code',u'第%s次开始'%cvrRltIdx, u'第%s次结束'%cvrRltIdx, u'第%s次量能'%cvrRltIdx]
                 if finalRslt.empty==True:
                     finalRslt = rslt.copy()
                 else:
-                    finalRslt = pd.merge(finalRslt,rslt,how='left', on=['ts_code'])
+#                    finalRslt = pd.merge(finalRslt,rslt,how='left', on=['ts_code'])
+                    finalRslt = pd.merge(finalRslt,rslt,how='outer', on=['ts_code'])
+#                    finalRslt = pd.concat([finalRslt, rslt], keys=['ts_code'], axis=1, sort=False, verify_integrity =True)
                     # add code column to DF
 
             #print(finalRslt)
@@ -1316,11 +1369,11 @@ class CVRatioModel(Sqlite3Handler):
         #logger.debug(finalRslt)
         finalRslt.fillna('', inplace= True)
         pub.sendMessage("pubMsg_CVRatioModel", msg=("endCVRBtn", finalRslt))
-        logger.debug("Caculation for %s is finished!! Time used: %.2fs",'CVR',(time.time()-begintime))
-        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
-        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
-                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
-        gc.collect()
+        logger.debug("Caculation for %s is finished!",'CVR')
+#        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
+#                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
+#        gc.collect()
 
 
     def sortExistedRPSdata(self, para):
