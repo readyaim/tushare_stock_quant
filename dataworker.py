@@ -1240,10 +1240,6 @@ class CVRatioModel(Sqlite3Handler):
         return df
 
     def readDataFromTableForCVR(self, tablenm, targetColnm, dateRange):
-        #MAdays = self.getMAdaysList()
-        #startDate = self.get_startdate_byworkday(self.cvrStartDate,max(MAdays))
-        #dateRange = (startDate, self.cvrEndDate)
-        #targetColnm = "turnover_rate"
         if self.checkTableExists(tablenm):
             cmd="SELECT trade_date,ts_code, weighted_close, %s FROM %s where trade_date BETWEEN ? AND ?"%(targetColnm, tablenm)
             try:
@@ -1257,11 +1253,6 @@ class CVRatioModel(Sqlite3Handler):
     
     @log_memory_usage
     def calcCVR(self):
-        #时间 内存统计
-#        begintime = time.time()
-#        memInfo = psutil.virtual_memory()
-#        startMemUsage = psutil.Process(os.getpid()).memory_info().rss
-
         starttime = time.time()
         self.gauagecounter = 5
         # start, init gauge
@@ -1366,7 +1357,7 @@ class CVRatioModel(Sqlite3Handler):
         finalRslt = self.adjustStyleOfCVRoutput(finalRslt)
         #删除表格的NaN值
         finalRslt.fillna('', inplace= True)
-        finalRslt.to_csv(r'data/finalRslt.csv', index=False, encoding='utf_8_sig')
+#        finalRslt.to_csv(r'data/finalRslt.csv', index=False, encoding='utf_8_sig')
         pub.sendMessage("pubMsg_CVRatioModel", msg=("endCVRBtn", finalRslt))
         logger.debug("Caculation for %s is finished!",'CVR')
 
