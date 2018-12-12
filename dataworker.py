@@ -1337,45 +1337,55 @@ class CVRatioModel(Sqlite3Handler):
 
             #4. start caculation CV
             rslt = self.startCVRcaculation(df)
-
+            #第4列转换为字符串: format函数
+            rslt.iloc[:,3] = rslt.iloc[:,3].apply(lambda x: format(x,'.4f'))
             logger.debug("startCVRcaculation: %s",  "%.2f"%(time.time()-starttime))
             starttime = time.time()
 
             #最终结果
             if (not rslt.empty):
-                print("show cvrRltIdx result:")
-                print(rslt)
-                rslt.columns = ['ts_code',u'第%s次开始'%cvrRltIdx, u'第%s次结束'%cvrRltIdx, u'第%s次量能'%cvrRltIdx]
+#                print("show cvrRltIdx result:")
+#                print(rslt)
+                #rslt.to_csv('rslt_%s.csv'%cvrRltIdx, index=False)
+                #rslt.columns = ['ts_code',u'第%s次开始'%cvrRltIdx, u'第%s次结束'%cvrRltIdx, u'第%s次量能'%cvrRltIdx]
                 if finalRslt.empty==True:
                     finalRslt = rslt.copy()
                 else:
-#                    finalRslt = pd.merge(finalRslt,rslt,how='left', on=['ts_code'])
-                    finalRslt = pd.merge(finalRslt,rslt,how='outer', on=['ts_code'])
-#                    finalRslt = pd.concat([finalRslt, rslt], keys=['ts_code'], axis=1, sort=False, verify_integrity =True)
-                    # add code column to DF
-
-            #print(finalRslt)
-            # resume dropped data, for next preCond detect
-
+                    finalRslt = pd.merge(finalRslt,rslt,how='outer', on=['ts_code'])    #how='inner', 'left'
             logger.debug("length of df is %d, before attend", len(df))
+            #将满足退出条件的数据恢复，重新循环计算CVR
             if (not df_tailed.empty):
                 df = df.append(df_tailed, sort=False)
             logger.debug("length of df is %d, after attend", len(df))
             logger.debug("finalRslt: %s",  "%.2f"%(time.time()-starttime))
             starttime = time.time()        
-        #finalRslt.to_csv(r'data/finalRslt.csv', index=False, encoding='utf_8_sig')
+        
         self.gauagecounter += 10
         pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
-        #logger.debug(finalRslt)
+        # 转换格式，把第N次满足条件的数据向左对七
+        finalRslt = self.adjustStyleOfCVRoutput(finalRslt)
+        #删除表格的NaN值
         finalRslt.fillna('', inplace= True)
+        finalRslt.to_csv(r'data/finalRslt.csv', index=False, encoding='utf_8_sig')
         pub.sendMessage("pubMsg_CVRatioModel", msg=("endCVRBtn", finalRslt))
         logger.debug("Caculation for %s is finished!",'CVR')
-#        endMemUsage = psutil.Process(os.getpid()).memory_info().rss
-#        logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
-#                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
-#        gc.collect()
 
-
+    def adjustStyleOfCVRoutput(self, df):
+        """调整CVR输出格式，左对齐"""
+        #1.将所有列合并成一行字符串，用逗号隔开
+        df = df.apply(lambda x: x.str.cat(sep=','), axis=1).to_frame()
+        #2. 列名
+        df.columns = ['all']
+        #3. 根据逗号分成不同的列，左对齐
+        df = df['all'].apply(lambda x: pd.Series(x.split(',')))
+        colnms = ['ts_code']
+        #4. 生成列名
+        for i in range((len(df.columns)-1)//3):
+            colnms.append('第%s次开始'%(i+1))
+            colnms.append('第%s次结束'%(i+1))
+            colnms.append('第%s次量能'%(i+1))
+        df.columns = colnms
+        return df
     def sortExistedRPSdata(self, para):
         df=para[0]
         colname = para[1]
@@ -1664,7 +1674,27 @@ df3 = pd.merge(df2,df[a],how='inner', on = ['trade_date', 'ts_code'])
 
 pd.io.sql.to_sql(df3, 'hqall_t', engine, if_exists='append',index=False, chunksize= 10000)
 
+df1 = pd.read_csv('rslt_1.csv', dtype='str')
+df2 = pd.read_csv('rslt_2.csv', dtype='str')
+df3 = pd.read_csv('rslt_3.csv', dtype='str')
+df = pd.merge(df1, df2, how='outer', on=['ts_code'])
+df = pd.merge(df, df3, how='outer', on=['ts_code'])
+df.fillna('', inplace= True)
+df = df[df.notna()].astype('str')
+df = df.apply(lambda x: x.str.cat(sep=','), axis=1).to_frame()
+df.columns = ['all']
+df = df['all'].apply(lambda x: pd.Series(x.split(',')))
+colnms = ['ts_code']
+for i in range((len(df.columns)-1)//3):
+    colnms.append('第%s次开始'%(i+1))
+    colnms.append('第%s次结束'%(i+1))
+    colnms.append('第%s次量能'%(i+1))
+df.columns = colnms
 
+df = df['trade_date_x_x, '].apply(lambda x: pd.Series(x.split(',')))
 
+df['all'] = 
+df = df['City, State, Country'].apply(lambda x: pd.Series(x.split(',')))        
+df['']    
 
 '''
