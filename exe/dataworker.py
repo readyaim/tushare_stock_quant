@@ -685,6 +685,9 @@ class CalcRPS_Model(Sqlite3Handler):
 #        rps_nm = 'rps%s'%self.rpsN
 #        rpsN = int(self.rpsN)
 #        cmd="SELECT * FROM %s"%self.tablenm_hqall
+        #params = ('ts_code', 'trade_date', 'weighted_close')
+        #cmd="SELECT ?,?,? FROM %s"%self.tablenm_hqall
+#        logger.debug("sql cmd: %s", cmd)
         cmd1="SELECT * FROM %s"%(self.tablenm_hqall)
         cmd2="SELECT * FROM %s"%(self.tablenm_rawdata)
         cmds = {self.tablenm_hqall: cmd1, self.tablenm_rawdata:cmd2}
@@ -742,7 +745,17 @@ class CalcRPS_Model(Sqlite3Handler):
                 pub.sendMessage("pubMsg_CalcRPS_Model", msg=("nmRpsGauage", counter))
             except Exception as e:
                 logger.error(e)
-
+                
+#            logger.debug("Caculation for %s is finished!! Time used: %.2fs",rps_nm,(time.time()-start))
+#            
+#            endMemUsage = psutil.Process(os.getpid()).memory_info().rss
+#            logger.info("memory usage: start=%sKB, end=%sKB, diff = %sKB", format(startMemUsage/1000,',.0f'),\
+#                                 format(endMemUsage/1000,',.0f'), format((endMemUsage-startMemUsage)/1000,',.0f'))
+#            gc.collect()
+            #close engine
+           # self.engine.dispose()   
+#            conn.commit()
+#            conn.close()
             pub.sendMessage("pubMsg_CalcRPS_Model", msg="end_calcAllRPS")
 
 class DnldHQDataModel(Sqlite3Handler):
@@ -813,14 +826,9 @@ class DnldHQDataModel(Sqlite3Handler):
 
     @log_time_delta
     #@time_limit(15)
-    def getOneDayHQdata(self, que, ts_date): 
-        """ download share data, return True if dnld is ok, return false if no data, and save date to holiday.csv"""
+    def getOneDayHQdata(self, que, ts_date):
         #某天换手率
         df1 = pro.daily_basic(ts_code='', trade_date=ts_date)
-        if df1.empty:
-            with open('holidays.csv', 'a') as fw:
-                fw.write(ts_date+',')
-            return False
         #某天日线数据
         df2 = pro.daily(trade_date=ts_date)
         #某天复权因子
@@ -842,7 +850,7 @@ class DnldHQDataModel(Sqlite3Handler):
         que.put((ts_date, df))
         logger.debug("download thread: put %s to queue",ts_date)
         return True
-        
+
     @log_memory_usage
     def updateHQdataByDate(self):
         #启动save sqlite3线程
@@ -878,8 +886,6 @@ class DnldHQDataModel(Sqlite3Handler):
         maxDateStr = self.readMaxDateInAttr_t()
         logger.debug("maxDateStr = %s", maxDateStr)
         logger.debug("minDateStr = %s", self.readMinDateInAttr_t())
-        initThreadCount = threading.active_count()
-        print("init threading.active_count() is %d"%threading.active_count())
         for ts_date in ts_dates:
             gaugeCounter += gaugeStep
             #print(ts_date)
@@ -894,14 +900,9 @@ class DnldHQDataModel(Sqlite3Handler):
                     else:
                         m = threading.Thread(target = self.getOneDayHQdata, args=(self.que, ts_date))
                         m.setDaemon(True)
-                        m.name = ts_date
                         m.start()
-                        time.sleep(0.4)
-                        #m.join(timeout = 25)        #wait for 25s, then skip
-                        print(threading.active_count())
-                        while (threading.active_count()>9):
-                            time.sleep(0.5)
-                            
+                        
+                        m.join(timeout = 25)        #wait for 25s, then skip
                         gaugeCounter += gaugeStep*3
 
                 else:
@@ -921,8 +922,6 @@ class DnldHQDataModel(Sqlite3Handler):
             except Exception as e:
                 logger.info(e)
         #t.join()
-        self.waitMultiThread(initThreadCount, 20)
-
         # wait for queue is empty, then sqlite3 can be accessed
         while (not self.que.empty()):
             pass
@@ -952,26 +951,6 @@ class DnldHQDataModel(Sqlite3Handler):
                     logger.debug("sqlite3 thread: write %s to database",data[0])
                 #que
             #time.sleep(0.2)
-    def waitMultiThread(self, initThreadCount, timeout):
-        start = time.time()
-        startCount = threading.active_count()
-        while True:
-            if threading.active_count()<= initThreadCount:
-                logger.debug("break out from waitMultiThread with threading.active_count = %d",threading.active_count())
-                break
-            #update start time when thread finishes
-            if (threading.active_count()<startCount):
-                start = time.time()
-
-            if (time.time() - start > timeout):
-                logger.debug("break out from waitMultiThread with timeout %s"%format((time.time() - start), ".2f"))
-                #print(threading.enumerate())
-                break
-            
-            time.sleep(1)
-            #print(threading.active_count())
-            logger.debug("delta time is %s"%format((time.time() - start), ".2f"))
-
     def read_from_DB(self):
         tablenm = self.tablenm_hqall
         date = "2018-10-18"
@@ -984,25 +963,21 @@ class DnldHQDataModel(Sqlite3Handler):
         # read DataFrame by 'TimeStr'
         rd_cmd = "SELECT * FROM %s where date = '%s %s'"%(tablenm, date, self.date_tail)
         df = pd.read_sql(rd_cmd, self.engine)
-        #print(df)
+        
+        print(df)
     
-    def getHolidaysList(self):
-        holidays=[]
-        try:
-            with open('holidays.csv', 'r') as fr:
-                for line in fr:
-                    holidays.extend(line.strip().split(','))
-                if ('' in holidays):
-                    holidays.remove('')
-        except Exception as e:
-            logger.debug(e)
-        return holidays
 
+            
     def getDateStrListToDnld(self, sDateStr, eDateStr):
-        holidays=self.getHolidaysList()
-        holidays.extend(self.holidayDateStrs)
-        holidays = list(set(holidays))
-        #print(holidays)
+        holidays = ['20181005', '20181004', '20181003', '20181002', '20181001', \
+                         '20180924', '20180618', '20180501', '20180430', '20180406', \
+                         '20180405', '20180221', '20180220', '20180219', '20180216', \
+                         '20180215', '20180105', '20180104', '20180103', '20180101', \
+                         '20171006', '20171005', '20171004', '20171003', '20171002', \
+                         '20170530', '20170529', '20170501', '20170404', '20170403', \
+                         '20170202', '20170201', '20170131', '20170130', '20170127', \
+                         '20170102']
+
         dateStrLists=[]
         dnldStartDate = datetime.strptime(sDateStr.replace('-',''), "%Y%m%d")
         dnldEndDate = datetime.strptime(eDateStr.replace('-',''), "%Y%m%d")
@@ -1123,7 +1098,6 @@ class CVRatioModel(Sqlite3Handler):
         self.runCvrAllowed = True
         self.gauagecounter=0
         self.cvrDisplayDay = 120
-        self.turnOverCol = "turnover_rate_f"      #"turnover_rate_f or turnover_rate"
         
         
     def getInitPreCondData(self):
@@ -1209,7 +1183,6 @@ class CVRatioModel(Sqlite3Handler):
         df.drop(df.index[df['condFlag']==False], inplace=True)
     
     def startCVRcaculation(self,df):
-        targetColnm = self.turnOverCol
         cvrThreshold = int(self.cvrThreshold )
         #量能开始
         #rslt = pd.DataFrame(index=df.groupby('ts_code', as_index=False).first().index)
@@ -1217,7 +1190,7 @@ class CVRatioModel(Sqlite3Handler):
         #1st CV, start date 
         #rslt = pd.merge(rslt,dfCodeDate,how='inner', on=['ts_code'])
         #量能结束        
-        df['cv']= df.groupby(df['ts_code'])[targetColnm].apply(lambda x: x.cumsum())
+        df['cv']= df.groupby(df['ts_code'])['turnover_rate'].apply(lambda x: x.cumsum())
         df['cvflag']=df['cv']>=cvrThreshold
         #df_reserved = df[df['cvflag']==False].copy()       #not used, drop
         df.drop(df.index[df['cvflag']==False], inplace=True)
@@ -1239,12 +1212,11 @@ class CVRatioModel(Sqlite3Handler):
                 MAdays.append(int(self.cond[idx]['MAdays']))
         return MAdays
     def getDataFromDB(self):
-        targetColnm = self.turnOverCol
         MAdays = self.getMAdaysList()
         startDate = self.get_startdate_byworkday(self.cvrStartDate,max(MAdays))
         dateRange = (startDate, self.cvrEndDate)
         logger.debug(dateRange)
-        cmd="SELECT trade_date,ts_code, weighted_close, %s FROM hqall_t where trade_date BETWEEN ? AND ?"%targetColnm
+        cmd="SELECT trade_date,ts_code, weighted_close, turnover_rate FROM hqall_t where trade_date BETWEEN ? AND ?"
         df=pd.read_sql_query(cmd, self.engine, params = dateRange)
         logger.debug("the len of df is:  %d",  len(df))
         self.gauagecounter += 12
@@ -1255,7 +1227,7 @@ class CVRatioModel(Sqlite3Handler):
         MAdays = self.getMAdaysList()
         startDate = self.get_startdate_byworkday(self.cvrStartDate,max(MAdays))
         dateRange = (startDate, self.cvrEndDate)
-        targetColnm = self.turnOverCol
+        targetColnm = "turnover_rate"
         
         df1 = self.readDataFromTableForCVR('hqall_t', targetColnm, dateRange)
         logger.debug("the len of df1 in hqall_t is:  %d",  len(df1))
