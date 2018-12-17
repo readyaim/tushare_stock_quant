@@ -896,7 +896,7 @@ class DnldHQDataModel(Sqlite3Handler):
                         m.setDaemon(True)
                         m.name = ts_date
                         m.start()
-                        time.sleep(0.4)
+                        time.sleep(0.1)
                         #m.join(timeout = 25)        #wait for 25s, then skip
                         print(threading.active_count())
                         while (threading.active_count()>9):
@@ -961,6 +961,7 @@ class DnldHQDataModel(Sqlite3Handler):
                 break
             #update start time when thread finishes
             if (threading.active_count()<startCount):
+                startCount = threading.active_count()
                 start = time.time()
 
             if (time.time() - start > timeout):
