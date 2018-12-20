@@ -10,7 +10,8 @@ import dataworker
 import sys
 import os
 import wx
-from wx.lib.pubsub import pub
+#from wx.lib.pubsub import pub
+from pubsub import pub
 from datetime import datetime, timedelta
 from time import ctime, sleep
 import threading
@@ -118,7 +119,6 @@ import wx.grid
 #import hqdata
 from datetime import datetime,timedelta
 import threading
-from wx.lib.pubsub import pub
 import wx.adv
 from wx.lib.splitter import MultiSplitterWindow
 
