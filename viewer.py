@@ -607,19 +607,19 @@ class RPSLeftPanel(wx.Panel):
         #print(e.GetString())
         pass
     
-    def EvtRetNameValue(self):
+    def EvtRetNameValue(self,event):
         ""
         name = event.GetEventObject().GetName()
         para = event.GetEventObject().GetValue()
         pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
     
-    def EvtRetNameString(self):
+    def EvtRetNameString(self,event):
         "cmbxRange"
         name = event.GetEventObject().GetName()
         para = event.GetString()
         pub.sendMessage("pubMsg_RPSLeftPanel", msg=(name, para))
         
-    def EvtRetNameDatetime(self):
+    def EvtRetNameDatetime(self,event):
         "datepick"
         name = event.GetEventObject().GetName()
         para = event.GetEventObject().GetValue().Format("%Y%m%d")
@@ -2135,7 +2135,8 @@ class Controller_CVRatio(object):
         #self.view.setCondBarOff()
         ##Disable PreCond Bar
         #self.view.setPreCondBarOff()
-        
+        # Disable EndCond Bar
+        self.view.setEndCondBarOnOff(False)
         
         
         # msg from view to controller
@@ -2520,7 +2521,7 @@ class DnldHQDataPanel(wx.Panel):
             xPos +=button.GetSize().width
             grid.Add(button, pos)
     def buildOneButton(self, parent, label, handler, pos=(0,0)):
-        button = wx.button(parent, -1, label, pos)
+        button = wx.Button(parent, -1, label, pos)
         self.Bind(wx.EVT_BUTTON, handler, button)
         return button
 

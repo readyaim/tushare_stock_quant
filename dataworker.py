@@ -1111,7 +1111,12 @@ class CVRatioModel(Sqlite3Handler):
     """Cumulated Volume Ratio Choosing Stock"""
     def __init__(self):
         self.cvrStartDate = "20161010"
-        self.cvrEndDate = "20181110"
+#         self.cvrEndDate = "20181110"
+        if (datetime.now().hour>16):
+            self.cvrEndDate = datetime.now().strftime("%Y%m%d")
+        else:
+            self.cvrEndDate = (datetime.now()-timedelta(days=1)).strftime("%Y%m%d")
+        
         super(CVRatioModel, self).__init__("pubMsg_CVRatioModel", 'hfq')
         self.cvrDays = 5
         self.preCond = self.getInitPreCondData()
