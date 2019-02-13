@@ -92,11 +92,11 @@ def log_time_delta(func):
     """Log function running time"""
     @wraps(func)
     def deco(*args, **kwargs):
-        start = datetime.now()
+        start = time.time()
         res = func(*args, **kwargs)
-        end = datetime.now()
+        end = time.time()
         delta = end - start
-        logger.debug("Tushare download time is %s", delta)
+        logger.debug("%s running time is %.2fs", func.__name__, delta)
         return res
     return deco
 
@@ -1132,14 +1132,15 @@ class CVRatioModel(Sqlite3Handler):
     def getInitCondData(self):
         return {'1': {'Cbx':True, "MAdir":u'偏离', "MAdays":'5', "DiffDir":u'至多', "DiffValue":'10'},
                     '2': {'Cbx':True, "MAdir":u'偏离', "MAdays":'20', "DiffDir":u'至多', "DiffValue":'10'},
-                    '3': {'Cbx':False, "MAdir":u'偏离', "MAdays":'30', "DiffDir":u'至多', "DiffValue":'10'},
-                    '4': {'Cbx':False, "MAdir":u'偏离', "MAdays":'60', "DiffDir":u'至多', "DiffValue":'10'},
-                    '5': {'Cbx':False, "MAdir":u'偏离', "MAdays":'120', "DiffDir":u'至多', "DiffValue":'10'},
-                    '6': {'Cbx':False, "MAdir":u'偏离', "MAdays":'240', "DiffDir":u'至多', "DiffValue":'20'} }
+                    '3': {'Cbx':True, "MAdir":u'偏离', "MAdays":'30', "DiffDir":u'至多', "DiffValue":'10'},
+                    '4': {'Cbx':True, "MAdir":u'偏离', "MAdays":'60', "DiffDir":u'至多', "DiffValue":'10'},
+                    '5': {'Cbx':True, "MAdir":u'偏离', "MAdays":'120', "DiffDir":u'至多', "DiffValue":'10'},
+                    '6': {'Cbx':True, "MAdir":u'偏离', "MAdays":'240', "DiffDir":u'至多', "DiffValue":'20'} }
 
     def getInitEndCondData(self):
-        return {'Cbx':True, "MAdir":u'偏离', "MAdays":'240', "DiffDir":u'至少', "DiffValue":'20'}
+        return {'Cbx':False, "MAdir":u'偏离', "MAdays":'240', "DiffDir":u'至少', "DiffValue":'20'}
     
+    @log_time_delta
     def addMAvaluesToDF(self, df):
         MAdays = self.getMAdaysList()
         for maday in set(MAdays):
@@ -1172,7 +1173,7 @@ class CVRatioModel(Sqlite3Handler):
 #            df2 = 
 #            df[column_nm] = df1 or df2
 #            df[column_nm] = df['weighted_close'].apply(lambda x:x>50 or x<60)
-        
+    @log_time_delta
     def cleanDFbyPreCond(self,df):
         """ Remove data in df that fails PreCond, df is modified inplaced"""
         if (self.preCond['Cbx']==True):
@@ -1191,7 +1192,7 @@ class CVRatioModel(Sqlite3Handler):
             df['pre'] = df['pre']>0
             # drop row with df['pre']==False, which are not satisfied preCond
             df.drop(df.index[df['pre']==False], inplace=True)
-            
+    @log_time_delta        
     def popDFbyEndCond(self, df):
         """Pop the data from df that satisfiy End condition
             Return the poped data as df_tailed (dataframe) for next round checking(from preCond) """
@@ -1207,15 +1208,13 @@ class CVRatioModel(Sqlite3Handler):
 #            df['end']=(df['weighted_close']-df['ma%s'%cvrEndMAdays]*(1-cvrEndDiffValue))<0
             self.add_bool_to_DF_by_cond(df, self.cvrEndCond['MAdir'], cvrEndMAdays, self.cvrEndCond['DiffDir'], cvrEndDiffValue,  'end')
             #rolling sum for cvrEndDayRange, 移动和
-            df['end']= df.groupby(['ts_code'])['end'].apply(lambda x: x.rolling(cvrEndDayRange).sum())
+            df['end']= df.groupby(df['ts_code'])['end'].apply(lambda x: x.rolling(cvrEndDayRange).sum())
             #收盘价连续大于MA20 5天
             # rolling sum is bigger than cvrEndDays
             df['end']=(df['end']>=cvrEndDays)
             
-        df["not_condFlag"] = ~ df['condFlag']
-        df['end_condFlag']= df.groupby(df['ts_code'])['not_condFlag'].apply(lambda x: x.rolling(cvrEndDayRange).sum())
-        df['end_condFlag']=(df['end_condFlag']>=cvrEndDays)
-            
+        df['end_condFlag']= df.groupby(df['ts_code'])['condFlag'].apply(lambda x: x.rolling(cvrEndDayRange).sum())
+        df['end_condFlag']=(df['end_condFlag']<(cvrEndDayRange-cvrEndDays))            
         df["end"] = df["end"] | df['end_condFlag']    
             
         df['end']= df.groupby(df['ts_code'])['end'].apply(lambda x: x.cumsum())
@@ -1225,37 +1224,13 @@ class CVRatioModel(Sqlite3Handler):
         df_tailed = df[df['end']==True].copy()
         df.drop(df.index[df['end']==True], inplace=True)
         return df_tailed
-#        else:
-#            # return empty dataframe
-#            return pd.DataFrame()
-    def popDFbyEndCond_bk(self, df):
-        """Pop the data from df that satisfiy End condition, and return the poped data as dataframe """
-        if (self.cvrEndCond['Cbx']==True):
-            cvrEndDays = int(self.cvrEndDays)
-            cvrEndMAdays = int(self.cvrEndCond['MAdays'])
-            cvrEndDiffValue = float(self.cvrEndCond['DiffValue'])/100
-            #求移动平均
-            #df['end']= df.groupby('ts_code')['weighted_close'].apply(lambda x: x.rolling(cvrEndMAdays).mean())
-#            df['end']=(df['weighted_close']-df['ma%s'%cvrEndMAdays]*(1-cvrEndDiffValue))<0
-            self.add_bool_to_DF_by_cond(df, self.cvrEndCond['MAdir'], cvrEndMAdays, self.cvrEndCond['DiffDir'], cvrEndDiffValue,  'end')
-            #rolling sum for cvrEndDays, 移动和
-            df['end']= df.groupby(['ts_code'])['end'].apply(lambda x: x.rolling(cvrEndDays).sum())
-            #收盘价连续大于MA20 5天
-            df['end']=(df['end']>=cvrEndDays)
-            #将首次满足终止条件后的每一天都标注True
-            df['end']= df.groupby(df['ts_code'])['end'].apply(lambda x: x.cumsum())
-            df['end'] = (df['end']>0)
-            # drop and reserved the data satisfied 'end' condition
-            df_tailed = df[df['end']==True].copy()
-            df.drop(df.index[df['end']==True], inplace=True)
-            return df_tailed
-        else:
-            # return empty dataframe
-            return pd.DataFrame()
     
+    @log_time_delta
     def dropDFbyCond(self, df):
         cvrDays = int(self.cvrDays)
-        
+        #init 'condflag' column to True
+        df['condFlag']=True
+
         for idx in self.cond:
             if self.cond[idx]['Cbx']==True:
                 MAdays=int(self.cond[idx]['MAdays'])
@@ -1285,57 +1260,35 @@ class CVRatioModel(Sqlite3Handler):
         # delete data that unsatisfy 
         df.drop(df.index[df['condFlag_sum']==False], inplace=True)
     
+    @log_time_delta
     def startCVRcaculation(self,df):
         """ sum() the df[targetColnm], drop the data that df[targetColnm] < cvrThreshold
             Record the first and last data as begining date and end date
             return the result
         """
-        targetColnm = self.turnOverCol
-        cvrThreshold = int(self.cvrThreshold )
-        #量能开始
-        cv_s = df.groupby(df['ts_code'])[targetColnm].apply(lambda x: x.sum())
-        cv_df =cv_s.reset_index()
-        cv_df.columns=['ts_code','cv']
-        if "cv" in df.columns:
-            df.drop(['cv'],axis=1,inplace=True)
-        df=pd.merge(df, cv_df, on='ts_code', how='outer')
-                
-        #rslt = pd.DataFrame(index=df.groupby('ts_code', as_index=False).first().index)
-#        rslt = df.groupby(df['ts_code'], as_index=False)['trade_date'].first()
-        #1st CV, start date 
-        #rslt = pd.merge(rslt,dfCodeDate,how='inner', on=['ts_code'])
-        #量能结束        
-        
-        df['cvflag']=df['cv']>=cvrThreshold
-        #df_reserved = df[df['cvflag']==False].copy()       #not used, drop
-        df.drop(df.index[df['cvflag']==False], inplace=True)
-        #dfCodeDateCV = df.groupby('ts_code')['trade_date', 'cv'].first()
-        rslt = df.groupby(df['ts_code'], as_index=False)['trade_date'].first()
-        dfCodeDateCV = df.groupby(df['ts_code'], as_index=False)['trade_date', 'cv'].last()
-        #print(dfCodeDateCV)
-        #第一次量能筛选结果, how=inner, start date is del if end data not exist
-        # 1st CV: startdate, end date, cv
-        rslt = pd.merge(rslt,dfCodeDateCV,how='inner', on=['ts_code'], left_index=True)
-        return rslt
-    def startCVRcaculation_bk(self,df):
-        targetColnm = self.turnOverCol
-        cvrThreshold = int(self.cvrThreshold )
-        #量能开始
-        #rslt = pd.DataFrame(index=df.groupby('ts_code', as_index=False).first().index)
-        rslt = df.groupby(df['ts_code'], as_index=False)['trade_date'].first()
-        #1st CV, start date 
-        #rslt = pd.merge(rslt,dfCodeDate,how='inner', on=['ts_code'])
-        #量能结束        
-        df['cv']= df.groupby(df['ts_code'])[targetColnm].apply(lambda x: x.cumsum())
-        df['cvflag']=df['cv']>=cvrThreshold
-        #df_reserved = df[df['cvflag']==False].copy()       #not used, drop
-        df.drop(df.index[df['cvflag']==False], inplace=True)
-        #dfCodeDateCV = df.groupby('ts_code')['trade_date', 'cv'].first()
-        dfCodeDateCV = df.groupby(df['ts_code'], as_index=False)['trade_date', 'cv'].first()
-        #print(dfCodeDateCV)
-        #第一次量能筛选结果, how=inner, start date is del if end data not exist
-        # 1st CV: startdate, end date, cv
-        rslt = pd.merge(rslt,dfCodeDateCV,how='inner', on=['ts_code'], left_index=True)
+        if not df.empty:
+            targetColnm = self.turnOverCol
+            cvrThreshold = int(self.cvrThreshold )
+            #量能开始
+            cv_s = df.groupby(df['ts_code'])[targetColnm].apply(lambda x: x.sum())
+            cv_df =cv_s.reset_index()
+            cv_df.columns=['ts_code','cv']
+            if "cv" in df.columns:
+                df.drop(['cv'],axis=1,inplace=True)
+            df=pd.merge(df, cv_df, on='ts_code', how='outer')
+                    
+            #量能结束        
+            
+            df['cvflag']=df['cv']>=cvrThreshold
+    
+            df.drop(df.index[df['cvflag']==False], inplace=True)
+    
+            rslt = df.groupby(df['ts_code'], as_index=False)['trade_date'].first()
+            dfCodeDateCV = df.groupby(df['ts_code'], as_index=False)['trade_date', 'cv'].last()
+            # 1st CV: startdate, end date, cv
+            rslt = pd.merge(rslt,dfCodeDateCV,how='inner', on=['ts_code'], left_index=True)
+        else:
+            rslt = pd.DataFrame(columns=['ts_code', 'date1','date2','cv'])
         return rslt
     def getMAdaysList(self):
         MAdays = []
@@ -1360,6 +1313,7 @@ class CVRatioModel(Sqlite3Handler):
         pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
         return df
 
+    @log_time_delta
     def getDataFromTables(self):
         MAdays = self.getMAdaysList()
         startDate = self.get_startdate_byworkday(self.cvrStartDate,max(MAdays))
@@ -1388,59 +1342,47 @@ class CVRatioModel(Sqlite3Handler):
         else:
             return pd.DataFrame()
     
+    @log_time_delta
+    def sort_DF_by_column(self, df, column, ascend):
+        """ sort dataframe by column name and ascend type(True/False)"""
+        df = df.sort_values(by=column, ascending=ascend, inplace =True)
+    
     @log_memory_usage
     def calcCVR(self):
-        starttime = time.time()
+        
         self.gauagecounter = 5
         # start, init gauge
         pub.sendMessage("pubMsg_CVRatioModel", msg=("startCVRBtn", None))   #set panel off, start gauge
         pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
-        #1. data init. outside the loop.
-            #a. read all data from database, and sort by date
-            #b. calc all MA values
         preMAday = int(self.preCond["MAdays"])
         preDiffValue = float(self.preCond["DiffValue"])/100
         cvrDays = int(self.cvrDays)
-        
-        #dateRange = (self.cvrStartDate, self.cvrEndDate)
-        #cmd="SELECT trade_date,ts_code, weighted_close, turnover_rate FROM hqall_t where trade_date BETWEEN ? AND ?"
-        #df=pd.read_sql_query(cmd, self.engine, params = dateRange)
-        #logger.debug("the len of df is:  %d",  len(df))
-        #self.gauagecounter += 12
-        #pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
-        
-        #df = self.getDataFromDB()
-        df = self.getDataFromTables()
-        logger.debug("pd.read_sql_query: %s",  "%.2f"%(time.time()-starttime))
-        starttime = time.time()
+        #1. data init. outside the loop.
+            #a. read all data from database, and sort by date
+            #b. calc all MA values
 
-        #对时间排序
-        df = df.sort_values(by='trade_date', ascending=True)
+        df = self.getDataFromTables()
+
+        # sort data by date
+        self.sort_DF_by_column(df, 'trade_date', True)
+        starttime = time.time()
+#        df = df.sort_values(by='trade_date', ascending=True)
         self.gauagecounter += 7
         pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
-        logger.debug("df.sort_values: %s",  "%.2f"%(time.time()-starttime))
-        starttime = time.time()
+#        logger.debug("df.sort_values: %s",  "%.2f"%(time.time()-starttime))
+#        starttime = time.time()
 
-        #添加所有移动平均到DataFrame
+        # add MA data to df
         self.addMAvaluesToDF(df)
         self.gauagecounter += 40
         pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
-        logger.debug("addMAvaluesToDF: %s",  "%.2f"%(time.time()-starttime))
-        starttime = time.time()
 
-        #init 'condflag' column to True
-        df['condFlag']=True
-        #初始化最终结果
+        # initialize final result
         finalRslt = pd.DataFrame()
-        #满足量能次数
+        # init counter of CV, 满足量能次数
         cvrRltIdx=0
         while (not df.empty):
-            #init 'condflag' column to True
-            df['condFlag']=True
-            
             cvrRltIdx+=1
-            #df = df.sort_values(by='trade_date', ascending=True)
-
             logger.debug("df.sort_values: %s",  "%.2f"%(time.time()-starttime))
             starttime = time.time()
 
@@ -1449,48 +1391,33 @@ class CVRatioModel(Sqlite3Handler):
             if (cvrRltIdx==1):
                 self.gauagecounter += 12
                 pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
-            logger.debug("cleanDFbyPreCond: %s",  "%.2f"%(time.time()-starttime))
-            starttime = time.time()
 
+            #3. 2nd loop the "cond1-cond7", calc cond
+            self.dropDFbyCond(df)
+
+            #4. pop by End Cond to df_tailed
             df_tailed = self.popDFbyEndCond(df)
             if (cvrRltIdx==1):
                 self.gauagecounter += 10
                 pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
-
-            logger.debug("popDFbyEndCond: %s",  "%.2f"%(time.time()-starttime))
-            starttime = time.time()
-
-            #3. 2nd loop the "cond1-cond7", calc cond
-            self.dropDFbyCond(df)
             
-            logger.debug("dropDFbyCond: %s",  "%.2f"%(time.time()-starttime))
-            starttime = time.time()
-
-            #4. start caculation CV
+            #5. start caculation CV
             rslt = self.startCVRcaculation(df)
-            #第4列转换为字符串: format函数
-            rslt.iloc[:,3] = rslt.iloc[:,3].apply(lambda x: format(x,'.4f'))
-            logger.debug("startCVRcaculation: %s",  "%.2f"%(time.time()-starttime))
-            starttime = time.time()
 
-            #最终结果
+            #final result 
             if (not rslt.empty):
-#                print("show cvrRltIdx result:")
-#                print(rslt)
-                #rslt.to_csv('rslt_%s.csv'%cvrRltIdx, index=False)
-                #rslt.columns = ['ts_code',u'第%s次开始'%cvrRltIdx, u'第%s次结束'%cvrRltIdx, u'第%s次量能'%cvrRltIdx]
+                #transfer column 4th to string, using function: format 第4列转换为字符串: format函数
+                rslt.iloc[:,3] = rslt.iloc[:,3].apply(lambda x: format(x,'.4f'))
                 if finalRslt.empty==True:
                     finalRslt = rslt.copy()
                 else:
                     finalRslt = pd.merge(finalRslt,rslt,how='outer', on=['ts_code'])    #how='inner', 'left'
             logger.debug("length of df is %d, before attend", len(df))
-            #将满足退出条件的数据恢复，重新循环计算CVR
-            if (not df_tailed.empty):
-#                 df = df.append(df_tailed, sort=False)
-                df=df_tailed.copy()
-            logger.debug("length of df is %d, after attend", len(df))
-            logger.debug("finalRslt: %s",  "%.2f"%(time.time()-starttime))
-            starttime = time.time()        
+
+            # reload df_tailed to df, start next round ...
+            df=df_tailed.copy()
+            logger.debug("length of df for next round is %d", len(df))
+                    
         
         self.gauagecounter += 10
         pub.sendMessage("pubMsg_CVRatioModel", msg=("updateGaugeCounter", self.gauagecounter))
@@ -1502,22 +1429,27 @@ class CVRatioModel(Sqlite3Handler):
         pub.sendMessage("pubMsg_CVRatioModel", msg=("endCVRBtn", finalRslt))
         logger.debug("Caculation for %s is finished!",'CVR')
 
-    def adjustStyleOfCVRoutput(self, df):
+    def adjustStyleOfCVRoutput(self, finalRslt):
         """调整CVR输出格式，左对齐"""
         #1.将所有列合并成一行字符串，用逗号隔开
-        df = df.apply(lambda x: x.str.cat(sep=','), axis=1).to_frame()
-        #2. 列名
-        df.columns = ['all']
-        #3. 根据逗号分成不同的列，左对齐
-        df = df['all'].apply(lambda x: pd.Series(x.split(',')))
-        colnms = ['ts_code']
-        #4. 生成列名
-        for i in range((len(df.columns)-1)//3):
-            colnms.append('第%s次开始'%(i+1))
-            colnms.append('第%s次结束'%(i+1))
-            colnms.append('第%s次量能'%(i+1))
-        df.columns = colnms
-        return df
+        if not finalRslt.empty:
+            finalRslt = finalRslt.apply(lambda x: x.str.cat(sep=','), axis=1).to_frame()
+            #2. 列名
+            finalRslt.columns = ['all']
+            #3. 根据逗号分成不同的列，左对齐
+            finalRslt = finalRslt['all'].apply(lambda x: pd.Series(x.split(',')))
+            colnms = ['ts_code']
+            #4. 生成列名
+            for i in range((len(finalRslt.columns)-1)//3):
+                colnms.append('第%s次开始'%(i+1))
+                colnms.append('第%s次结束'%(i+1))
+                colnms.append('第%s次量能'%(i+1))
+            finalRslt.columns = colnms
+        else:
+            finalRslt = pd.DataFrame({"ts_code":["null"]})
+            
+        return finalRslt
+    
     def sortExistedRPSdata(self, para):
         df=para[0]
         colname = para[1]
